@@ -1,0 +1,7 @@
+{
+  "name": "Repita a Nota - Escola de Música",
+  "description": "Um jogo educativo para desenvolver percepção auditiva e afinação musical através de análise de pitch em tempo real.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

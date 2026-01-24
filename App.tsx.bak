@@ -1,0 +1,413 @@
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { NOTES, EDUCATIONAL_QUOTES, MAX_SINGING_TIME } from './constants';
+import { GameState, NoteInfo, FeedbackData, VoiceType } from './types';
+import { audioEngine } from './services/audioEngine';
+import PitchDial from './components/PitchDial';
+import UserRegistration from './components/UserRegistration';
+import Ranking from './components/Ranking';
+import { supabaseService } from './services/supabase';
+
+// Logo
+import logoImg from './Logo Laranja.png';
+
+const App: React.FC = () => {
+  // --- STATES ---
+  const [gameState, setGameState] = useState<GameState>('START');
+  const [voiceType, setVoiceType] = useState<VoiceType | null>(null);
+  const [targetNote, setTargetNote] = useState<NoteInfo | null>(null);
+  const [userPitch, setUserPitch] = useState<number | null>(null);
+  const [feedback, setFeedback] = useState<FeedbackData | null>(null);
+  const [sessionScore, setSessionScore] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(MAX_SINGING_TIME);
+  const [playerName, setPlayerName] = useState<string | null>(localStorage.getItem('repita_playerName'));
+  const [isPlayingPhase, setIsPlayingPhase] = useState(false);
+  const [showRanking, setShowRanking] = useState(false);
+  const [realTimeAccuracy, setRealTimeAccuracy] = useState<number | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [scorePop, setScorePop] = useState(false);
+
+  // --- REFS ---
+  const lastNoteRef = useRef<string | null>(null);
+  const pitchHistory = useRef<number[]>([]);
+  const requestRef = useRef<number>();
+  const timerRef = useRef<number | null>(null);
+  const isListeningRef = useRef(false);
+  const playTimerRef = useRef<number | null>(null);
+  const voiceTypeRef = useRef<VoiceType | null>(null);
+  const gameStateRef = useRef<GameState>('START');
+
+  // --- SYNC REFS ---
+  useEffect(() => { voiceTypeRef.current = voiceType; }, [voiceType]);
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+
+  // Mobile Height Fix
+  useEffect(() => {
+    const handleResize = () => {
+      document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+    };
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // --- PITCH ENGINE ---
+  const updatePitchLoop = useCallback(() => {
+    if (isListeningRef.current) {
+      const result = audioEngine.getPitch();
+      if (result.pitch) {
+        setUserPitch(result.pitch);
+        pitchHistory.current.push(result.pitch);
+
+        if (targetNote) {
+          const diff = Math.abs(result.pitch - targetNote.frequency);
+          // More generous accuracy for real-time display
+          const accuracy = Math.max(0, 100 - (diff * 1.2));
+          setRealTimeAccuracy(accuracy);
+        }
+      }
+      requestRef.current = requestAnimationFrame(updatePitchLoop);
+    }
+  }, [targetNote]);
+
+  useEffect(() => {
+    if (gameState === 'LISTENING') {
+      isListeningRef.current = true;
+      requestRef.current = requestAnimationFrame(updatePitchLoop);
+    } else {
+      isListeningRef.current = false;
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    }
+    return () => {
+      isListeningRef.current = false;
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    };
+  }, [gameState, updatePitchLoop]);
+
+  // --- ACTIONS ---
+  const handleRegistrationComplete = (name: string) => {
+    setPlayerName(name);
+    localStorage.setItem('repita_playerName', name);
+    if (gameState === 'REGISTRATION') setGameState('START');
+  };
+
+  const startVoiceSelection = async () => {
+    if (!playerName) {
+      setGameState('REGISTRATION');
+      return;
+    }
+    await audioEngine.init();
+    setGameState('VOICE_SELECTION');
+  };
+
+  const selectVoice = (type: VoiceType) => {
+    setVoiceType(type);
+    voiceTypeRef.current = type;
+    setSessionScore(0);
+    startRound(type);
+  };
+
+  const startRound = async (type: VoiceType | null = voiceTypeRef.current) => {
+    const effectiveType = type || voiceTypeRef.current;
+    if (!effectiveType) return;
+
+    // Reset
+    const filteredNotes = NOTES.filter(note => {
+      if (effectiveType === 'MALE') return note.register === 'LOW' || note.register === 'MID';
+      return note.register === 'MID' || note.register === 'HIGH';
+    });
+    let availableNotes = filteredNotes.filter(n => n.name !== lastNoteRef.current);
+    if (availableNotes.length === 0) availableNotes = filteredNotes;
+    const randomNote = availableNotes[Math.floor(Math.random() * availableNotes.length)];
+
+    lastNoteRef.current = randomNote.name;
+    setTargetNote(randomNote);
+    setFeedback(null);
+    setUserPitch(null);
+    setRealTimeAccuracy(null);
+    setShowModal(false);
+    pitchHistory.current = [];
+
+    setGameState('PLAYING_TARGET');
+    setIsPlayingPhase(true);
+
+    await audioEngine.playSample(randomNote.fileUrl || '', 4.5);
+
+    if (playTimerRef.current) clearTimeout(playTimerRef.current);
+    setTimeLeft(5000);
+
+    playTimerRef.current = window.setTimeout(async () => {
+      setIsPlayingPhase(false);
+      await startListening();
+    }, 5000);
+  };
+
+  const startListening = async () => {
+    if (gameStateRef.current === 'RANKING') return;
+
+    setGameState('LISTENING');
+    setTimeLeft(5000);
+    const success = await audioEngine.startMic();
+    if (!success) {
+      setFeedback({ diff: 0, message: "ERRO MICROFONE", color: "text-red-500", score: 0 });
+      setTimeout(() => evaluateRound(), 2500);
+      return;
+    }
+
+    const startTime = Date.now();
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    timerRef.current = window.setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, 5000 - elapsed);
+      setTimeLeft(remaining);
+
+      if (remaining <= 0) {
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+        evaluateRound();
+      }
+    }, 50);
+  };
+
+  const evaluateRound = async () => {
+    if (gameStateRef.current === 'RANKING') return;
+
+    audioEngine.stopMic();
+    setGameState('ANALYZING');
+
+    // Ensure analysis message is visible
+    await new Promise(r => setTimeout(r, 800));
+
+    console.log("[Evaluate] Pitch history points:", pitchHistory.current.length);
+
+    if (pitchHistory.current.length > 5) {
+      const sorted = [...pitchHistory.current].sort((a, b) => a - b);
+      const medianPitch = sorted[Math.floor(sorted.length / 2)];
+
+      if (targetNote) {
+        const diff = medianPitch - targetNote.frequency;
+        const absDiff = Math.abs(diff);
+
+        let result: FeedbackData;
+        let roundScore = 0;
+
+        // VERY Generous tolerances for mobile/school environment
+        if (absDiff <= 25) {
+          roundScore = 100;
+          result = { diff, message: "PERFEITO!", color: "text-[#39FF14]", score: 100 };
+        } else if (absDiff <= 50) {
+          roundScore = 80;
+          result = { diff, message: "MUITO BOM!", color: "text-[#FF6B00]", score: 80 };
+        } else if (absDiff <= 80) {
+          roundScore = 50;
+          result = { diff, message: "BOM!", color: "text-orange-400", score: 50 };
+        } else {
+          roundScore = 20;
+          result = { diff, message: "QUASE LÁ", color: "text-zinc-500", score: 20 };
+        }
+
+        const accuracyIdx = Math.max(0, 100 - (absDiff * 1.0)).toFixed(0);
+        result.message += ` (${accuracyIdx}%)`;
+
+        console.log(`[Evaluate] Result: ${result.message}, Adding XP: ${roundScore}`);
+
+        setUserPitch(medianPitch);
+        setFeedback(result);
+
+        // Log before update
+        console.log(`[Evaluate] Current Session Score (before): ${sessionScore}`);
+
+        // FORCE Update session score
+        setSessionScore(current => {
+          const updated = Number(current) + Number(roundScore);
+
+          // Trigger local animation
+          setScorePop(true);
+          setTimeout(() => setScorePop(false), 600);
+
+          // BACKUP: Local Storage fallback for schools with blocked internet
+          if (playerName) {
+            const raw = localStorage.getItem('repita_local_scores') || '{}';
+            try {
+              const localScores = JSON.parse(raw);
+              localScores[playerName] = (localScores[playerName] || 0) + Number(roundScore);
+              localStorage.setItem('repita_local_scores', JSON.stringify(localScores));
+            } catch (e) { /* ignore */ }
+          }
+
+          return updated;
+        });
+
+        // Save to cloud
+        if (playerName && roundScore > 0) {
+          supabaseService.updateScore(playerName, roundScore).catch(console.error);
+        }
+      }
+    } else {
+      console.warn("[Evaluate] No pitch data found in history!");
+      setFeedback({ diff: 0, message: "TENTE MAIS ALTO!", color: "text-zinc-400", score: 0 });
+    }
+
+    setShowModal(true);
+    setGameState('FEEDBACK');
+    setRealTimeAccuracy(null);
+
+    // Auto Advance
+    setTimeout(() => {
+      if (gameStateRef.current !== 'RANKING') {
+        setShowModal(false);
+        startRound();
+      }
+    }, 4000); // 4s to see result nicely
+  };
+
+  const endSession = async () => {
+    if (playTimerRef.current) clearTimeout(playTimerRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
+    setGameState('RANKING');
+    setShowRanking(true);
+    audioEngine.stopMic();
+  };
+
+  // --- RENDER ---
+  if (gameState === 'REGISTRATION') return <UserRegistration onComplete={handleRegistrationComplete} />;
+
+  if (gameState === 'RANKING' || showRanking) {
+    return <Ranking
+      onBack={() => { setShowRanking(false); setGameState('START'); }}
+      currentPlayerName={playerName || ''}
+      currentSessionScore={sessionScore}
+    />;
+  }
+
+  if (gameState === 'START') {
+    return (
+      <div className="h-full bg-[#050505] flex flex-col items-center justify-center p-8 relative" style={{ height: 'var(--app-height)' }}>
+        <button onClick={() => setShowRanking(true)} className="absolute top-8 right-8 text-zinc-600 hover:text-[#FF6B00]">
+          <i className="fas fa-trophy text-2xl"></i>
+        </button>
+
+        <div className="bg-[#0A0A0A] p-12 py-16 rounded-[4rem] shadow-2xl border border-[#1A120D] max-w-sm w-full text-center relative overflow-hidden">
+          <div className="mx-auto mb-10 w-40 h-40 flex items-center justify-center relative">
+            <div className="absolute inset-0 bg-[#FF6B00] blur-[60px] opacity-20"></div>
+            <img src={logoImg} alt="Logo" className="w-full h-full object-contain relative z-10" />
+          </div>
+          <h1 className="text-4xl font-black text-white mb-2 tracking-tighter uppercase italic">Repita a Nota</h1>
+          <p className="text-zinc-800 mb-12 text-[10px] font-black uppercase tracking-[0.5em]">Treino Auditivo</p>
+          <button
+            onPointerDown={startVoiceSelection}
+            className="w-full py-6 bg-[#FF6B00] text-[#121212] rounded-2xl font-black text-xl active:scale-95 shadow-orange-500/20 shadow-lg uppercase italic"
+          >
+            {playerName ? `JOGAR COMO ${playerName.split(' ')[0]}` : 'COMEÇAR'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (gameState === 'VOICE_SELECTION') {
+    return (
+      <div className="h-full bg-[#050505] flex flex-col items-center justify-center p-8 text-center" style={{ height: 'var(--app-height)' }}>
+        <h2 className="text-2xl font-black text-[#FF6B00] mb-12 uppercase italic tracking-[0.3em]">Tipo de Voz</h2>
+        <div className="grid grid-cols-1 gap-6 w-full max-w-sm">
+          <button onPointerDown={() => selectVoice('MALE')} className="p-8 bg-[#0A0A0A] border-2 border-[#1A120D] active:border-[#FF6B00] rounded-[2.5rem] flex items-center justify-between shadow-xl">
+            <p className="text-white font-black text-2xl uppercase italic">Masculina</p>
+            <i className="fas fa-mars text-[#FF6B00] text-3xl"></i>
+          </button>
+          <button onPointerDown={() => selectVoice('FEMALE')} className="p-8 bg-[#0A0A0A] border-2 border-[#1A120D] active:border-[#FF6B00] rounded-[2.5rem] flex items-center justify-between shadow-xl">
+            <p className="text-white font-black text-2xl uppercase italic">Feminina</p>
+            <i className="fas fa-venus text-[#FF6B00] text-3xl"></i>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full bg-[#050505] flex flex-col items-center p-6 w-full max-w-md mx-auto relative overflow-hidden" style={{ height: 'var(--app-height)' }}>
+
+      {/* Feedback Modal */}
+      {showModal && feedback && (
+        <div className="absolute inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-[#0A0A0A] border-2 border-[#1A120D] p-10 rounded-[3rem] text-center w-full max-w-xs shadow-[0_0_50px_rgba(0,0,0,1)] scale-up-center">
+            <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
+              <i className="fas fa-chart-line text-[#FF6B00] text-2xl"></i>
+            </div>
+            <h3 className={`text-4xl font-black ${feedback.color} italic tracking-tighter mb-2`}>{feedback.message}</h3>
+            <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Avaliando afinação</p>
+          </div>
+        </div>
+      )}
+
+      <header className="w-full flex justify-between items-center mb-6 h-14 bg-[#0A0A0A] px-6 rounded-2xl border border-[#1A120D] shadow-2xl relative z-50">
+        <div className="flex items-center space-x-3">
+          <div className={`w-2 h-2 rounded-full ${voiceType === 'MALE' ? 'bg-blue-600' : 'bg-pink-600'}`}></div>
+          <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest truncate max-w-[80px]">{playerName}</span>
+        </div>
+        <div className="flex items-center space-x-4">
+          <div className={`bg-orange-500/10 px-4 py-1 rounded-lg border border-orange-500/20 transition-transform ${scorePop ? 'animate-score-up scale-110' : ''}`}>
+            <span className="text-lg font-black text-[#FF6B00] italic">+{sessionScore} XP</span>
+          </div>
+          <button onClick={endSession} className="text-zinc-700 hover:text-red-500"><i className="fas fa-power-off"></i></button>
+        </div>
+      </header>
+
+      <main className="flex-1 w-full flex flex-col items-center justify-center">
+        <div className="mb-10 min-h-[140px] w-full flex flex-col items-center justify-center text-center">
+          {gameState === 'PLAYING_TARGET' && (
+            <div className="animate-pulse">
+              <p className="text-[#FF6B00] font-black text-2xl italic tracking-widest mb-4 uppercase">Ouça...</p>
+              <div className="w-40 h-1 bg-zinc-800 mx-auto rounded-full overflow-hidden animate-shimmer"></div>
+            </div>
+          )}
+
+          {gameState === 'LISTENING' && (
+            <div className="scale-up-center">
+              <p className="text-white font-black text-2xl mb-2">CANTE!</p>
+              <p className="text-6xl font-black text-[#FF6B00]">{(timeLeft / 1000).toFixed(1)}s</p>
+              {realTimeAccuracy !== null && (
+                <div className="mt-6 bg-white/5 px-6 py-2 rounded-full border border-white/10">
+                  <div className="w-32 h-1 bg-zinc-800 rounded-full overflow-hidden mb-2 mx-auto">
+                    <div className="h-full bg-[#39FF14] transition-all duration-100" style={{ width: `${realTimeAccuracy}%` }}></div>
+                  </div>
+                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Sincronia vocal: {realTimeAccuracy.toFixed(0)}%</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {gameState === 'ANALYZING' && (
+            <div className="flex flex-col items-center">
+              <i className="fas fa-sync fa-spin text-3xl text-[#FF6B00] mb-4"></i>
+              <p className="text-zinc-500 font-black text-xl italic uppercase font-mono">Processando...</p>
+            </div>
+          )}
+        </div>
+
+        {targetNote && (
+          <div className={`transition-all duration-700 ${isPlayingPhase ? 'scale-110 opacity-100' : 'scale-90 opacity-30 grayscale'}`}>
+            <div className="w-52 h-52 rounded-full border-4 border-[#1A120D] bg-[#0A0A0A] flex flex-col items-center justify-center shadow-2xl relative">
+              {isPlayingPhase && <div className="absolute inset-0 bg-[#FF6B00]/5 animate-pulse rounded-full"></div>}
+              <h2 className="text-8xl font-black text-white italic relative z-10">{targetNote.name.split(' ')[0]}</h2>
+              <p className="text-[#FF6B00] text-sm font-bold mt-1 uppercase relative z-10">{targetNote.name.split(' ')[1]}</p>
+            </div>
+          </div>
+        )}
+
+        <div className="w-full mt-10 flex-1 relative bottom-0">
+          <PitchDial
+            diff={userPitch && targetNote ? userPitch - targetNote.frequency : 0}
+            isActive={gameState === 'LISTENING'}
+            currentFreq={userPitch}
+            timerProgress={timeLeft / 5000}
+          />
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default App;
