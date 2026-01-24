@@ -128,16 +128,18 @@ const App: React.FC = () => {
 
     try {
       await audioEngine.init();
+      // Explicitly trigger the browser prompt
       const success = await audioEngine.startMic();
+
       if (success) {
         audioEngine.stopMic(); // Just checking permission
         setShowInstructions(false);
         localStorage.setItem('repita_tutorial_seen', 'true');
       } else {
-        alert("Não conseguimos acessar o microfone. Verifique se você deu permissão nas configurações do seu navegador.");
+        alert("Não conseguimos acessar o microfone. No celular, você deve clicar em 'Permitir' quando o navegador perguntar.");
       }
     } catch (e) {
-      alert("Erro ao pedir permissão de microfone. Tente usar o navegador Chrome ou Safari.");
+      alert("Erro ao pedir permissão de microfone. Verifique as configurações do seu aparelho.");
     }
   };
 
@@ -147,16 +149,24 @@ const App: React.FC = () => {
       return;
     }
 
-    // Secondary Mic Check
-    const success = await audioEngine.startMic();
-    if (!success) {
-      alert("O microfone está desativado. Ative-o para poder jogar!");
-      return;
-    }
-    audioEngine.stopMic(); // Release it for the game loop
+    try {
+      await audioEngine.init();
+      const success = await audioEngine.startMic();
 
-    await audioEngine.init();
-    setGameState('VOICE_SELECTION');
+      if (success) {
+        audioEngine.stopMic(); // Release for the selection screen
+        setGameState('VOICE_SELECTION');
+      } else {
+        // Broad check for Secure Context + Permission blocking
+        if (!window.isSecureContext && !window.location.hostname.includes('localhost')) {
+          alert("⚠️ O microfone só funciona em conexões seguras (HTTPS). Acesse pelo link seguro para jogar.");
+        } else {
+          alert("⚠️ Microfone não autorizado. Clique no ícone de cadeado/ajustes ao lado da URL do site e permita o acesso ao Microfone.");
+        }
+      }
+    } catch (err) {
+      alert("Erro ao ativar microfone. Verifique se outro app está usando ele.");
+    }
   };
 
   const selectVoice = (type: VoiceType) => {
