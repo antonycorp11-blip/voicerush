@@ -50,7 +50,8 @@ export const supabaseService = {
           .from('repita_leaderboard')
           .update({
             total_xp: newTotal,
-            last_played_at: new Date().toISOString()
+            last_played_at: new Date().toISOString(),
+            pin: pin // Garantir que o PIN seja enviado para sincronização com a Galeria
           })
           .eq('id', existingUser.id);
 
