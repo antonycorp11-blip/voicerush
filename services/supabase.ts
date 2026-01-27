@@ -134,6 +134,23 @@ export const supabaseService = {
       console.error("Registration failed:", err);
       return false;
     }
+  },
+
+  async getPlayerByPin(pin: string): Promise<{ name: string } | null> {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase
+        .from('players')
+        .select('name')
+        .eq('recovery_pin', pin)
+        .limit(1);
+
+      if (error) throw error;
+      return data && data.length > 0 ? { name: data[0].name } : null;
+    } catch (err) {
+      console.error("Error verifying player PIN:", err);
+      return null;
+    }
   }
 }
 

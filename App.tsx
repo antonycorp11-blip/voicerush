@@ -29,6 +29,10 @@ const App: React.FC = () => {
   const [scorePop, setScorePop] = useState(false);
   const [showInstructions, setShowInstructions] = useState(!localStorage.getItem('repita_tutorial_seen'));
 
+  // --- AUTH STATES ---
+  const [isLocked, setIsLocked] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+
   // --- REFS ---
   const lastNoteRef = useRef<string | null>(null);
   const pitchHistory = useRef<number[]>([]);
@@ -55,14 +59,47 @@ const App: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // --- AUTH CHECK ---
+  useEffect(() => {
+    const checkAuth = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const urlPin = params.get('pin');
+
+      if (urlPin) {
+        setIsCheckingAuth(true);
+        const player = await supabaseService.getPlayerByPin(urlPin);
+
+        if (player && player.name) {
+          setPlayerName(player.name);
+          setPlayerPin(urlPin);
+          localStorage.setItem('repita_playerName', player.name);
+          localStorage.setItem('repita_playerPin', urlPin);
+          setIsLocked(false);
+        } else {
+          setIsLocked(true);
+        }
+        setIsCheckingAuth(false);
+      } else {
+        const savedName = localStorage.getItem('repita_playerName');
+        if (savedName) {
+          setIsLocked(false);
+        } else {
+          setIsLocked(true);
+        }
+        setIsCheckingAuth(false);
+      }
+    };
+    checkAuth();
+  }, []);
+
   // Sync PIN & authoritative score
   useEffect(() => {
     if (playerName) {
       supabaseService.getUser(playerName).then(user => {
         if (user) {
           if (user.pin && user.pin !== playerPin) {
-            setPlayerPin(user.pin);
-            localStorage.setItem('repita_playerPin', user.pin);
+            // Legacy sync removed: URL/Session PIN is now authoritative.
+            // Check performed on mount ensures validity.
           }
           if (user.total_xp !== undefined) {
             const raw = localStorage.getItem('repita_local_scores') || '{}';
@@ -292,7 +329,7 @@ const App: React.FC = () => {
         setTimeout(() => setScorePop(false), 600);
 
         if (playerName && roundXP > 0) {
-          supabaseService.updateScore(playerName, roundXP).then(newTotal => {
+          supabaseService.updateScore(playerName, roundXP, playerPin || undefined).then(newTotal => {
             if (newTotal !== null) {
               const raw = localStorage.getItem('repita_local_scores') || '{}';
               try {
@@ -334,6 +371,40 @@ const App: React.FC = () => {
   const secondsLeft = Math.ceil(timeLeft / 1000);
 
   // --- RENDER ---
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-full bg-[#050505] flex items-center justify-center p-4 text-[#FF6B00]" style={{ minHeight: 'var(--app-height)' }}>
+        <div className="animate-spin w-8 h-8 boundary-t-2 border-current rounded-full border-t-transparent border-2"></div>
+      </div>
+    );
+  }
+
+  if (isLocked) {
+    return (
+      <div className="min-h-full bg-[#050505] flex flex-col items-center justify-center p-6 text-center relative overflow-hidden" style={{ minHeight: 'var(--app-height)' }}>
+        <div className="absolute inset-0 bg-[#FF6B00] blur-[100px] opacity-10"></div>
+
+        <div className="relative z-10 flex flex-col items-center">
+          <div className="w-24 h-24 mb-6 rounded-3xl bg-[#0A0A0A] border border-[#1A120D] flex items-center justify-center shadow-2xl">
+            <i className="fas fa-lock text-4xl text-[#FF6B00]"></i>
+          </div>
+
+          <h1 className="text-3xl font-black text-white italic tracking-tighter uppercase mb-2">Acesso Restrito</h1>
+          <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-8 max-w-[200px] leading-relaxed">
+            Este jogo é exclusivo para alunos da Acorde Gallery.
+          </p>
+
+          <a
+            href="https://acordegallery.com"
+            className="px-8 py-4 bg-[#FF6B00] text-[#121212] rounded-xl font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-[0_10px_20px_rgba(255,107,0,0.2)]"
+          >
+            Acesse via Gallery
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   if (gameState === 'REGISTRATION') return <UserRegistration onComplete={handleRegistrationComplete} />;
 
   if (gameState === 'RANKING' || showRanking) {
@@ -408,6 +479,7 @@ const App: React.FC = () => {
                 localStorage.removeItem('repita_playerPin');
                 setPlayerName(null);
                 setPlayerPin(null);
+                window.location.reload();
               }}
               className="mt-6 text-zinc-800 hover:text-red-500 text-[8px] uppercase tracking-widest font-black transition-colors"
             >
