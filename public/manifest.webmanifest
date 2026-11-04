@@ -1,0 +1,13 @@
+{
+  "name": "Do Zero ao Palco — Music School Tycoon",
+  "short_name": "Do Zero ao Palco",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#2e2433",
+  "theme_color": "#2e2433",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
