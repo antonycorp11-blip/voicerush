@@ -1,5 +1,7 @@
 // UI layer: HUD, toolbar, side panels, modals, dialogs.
-import type { Game, Lead, DialogLine, UIHooks } from '../game/game';
+import type { Game, Lead, DialogLine, UIHooks, BuildSpot } from '../game/game';
+import { ROOM_TYPES, SKILL_MAP } from '../data/content';
+import type { RoomType } from '../data/content';
 import { INVESTOR_LOOK, BOSS_LOOK } from '../game/game';
 import type { PendingEvent, WeekStats } from '../game/state';
 import { DAY_FULL, DAY_NAMES, OPEN_HOUR, firstName, clearSave } from '../game/state';
@@ -32,6 +34,7 @@ export class UI implements UIHooks {
   skillSel: string | null = null;
   skillOpen = false;
   modalDepth = 0;
+  objCollapsed = window.innerHeight <= 520;
 
   constructor(g: Game, root: HTMLElement) {
     this.g = g;
@@ -134,7 +137,16 @@ export class UI implements UIHooks {
       const mine = g.lessons.filter((l) => l.player && l.score === null && l.agents[0]?.clickable).length;
       if (mine) h += `<div class="obj-wait lesson"><span>♪ <b>${mine}</b> aula(s) sua(s) agora</span><button class="btn small accent" data-act="teach">Dar aula</button></div>`;
     }
-    if (h !== this.objEl.dataset.h) { this.objEl.innerHTML = h; this.objEl.dataset.h = h; }
+    let mini = '';
+    if (s.chapter === 1) mini = `📋 ${s.ch1.tasks.filter((t) => !t.done).length} tarefa(s)`;
+    else if (s.chapter === 2) mini = `🎯 ${s.students.length}/8 alunos · ${Math.min(1000, s.youtube.views)}/1000 views`;
+    else if (s.investor) { const fc = g.forecast(); mini = `🎯 Meta: ${s.cash >= s.investor.goalCash ? '✅' : '❌'} caixa ${fc.profit >= s.investor.goalProfit ? '✅' : '❌'} lucro`; }
+    const waitIdx = h.indexOf('<div class="obj-wait');
+    const extras = waitIdx >= 0 ? h.slice(waitIdx) : '';
+    const body = this.objCollapsed ? `<div class="obj-mini">${mini}</div>${extras}` : h;
+    const out = `<button class="obj-tog" data-act="objToggle">${this.objCollapsed ? '▸' : '▾'}</button>${body}`;
+    this.objEl.classList.toggle('collapsed', this.objCollapsed);
+    if (out !== this.objEl.dataset.h) { this.objEl.innerHTML = out; this.objEl.dataset.h = out; }
   }
 
   tick(now: number) {
@@ -189,13 +201,59 @@ export class UI implements UIHooks {
       if (!p.owned && p.index !== g.layout.hall) continue;
       h += `<button class="room-row" data-act="room" data-arg="${p.index}"><b>${roomName(g, p)}</b><small>${p.owned ? `Nível ${p.decor + 1} · ${['Abandonado', 'Pintado', 'Aconchegante', 'Premium', 'Luxo'][p.decor]}` + (p.type === 'classroom' ? ' · ' + Object.keys(p.equip).map((i) => INSTRUMENTS[i as InstrumentId].emoji).join(' ') : '') : 'Compartilhado'}</small></button>`;
     }
-    const exp = g.s.plots.filter((p) => g.canRentPlot(p.index));
     if (g.s.chapter === 3) {
-      h += '<div class="sect">🧭 Expandir</div>';
-      h += exp.length ? exp.map((p) => `<button class="room-row exp" data-act="room" data-arg="${p.index}"><b>${g.expandLabel(p.index)}</b><small>espaço ${p.index + 1}</small></button>`).join('')
-        : '<p class="muted small">Nenhum espaço vizinho disponível. Desbloqueie o andar de cima em Expansão.</p>';
+      h += '<div class="sect">➕ Construir</div><p class="muted small">Escolha o tipo: a sala já vem pré-montada. Depois toque num dos encaixes tracejados no mapa.</p><div class="grid2">';
+      for (const [type, def] of Object.entries(ROOM_TYPES) as [RoomType, NonNullable<(typeof ROOM_TYPES)[RoomType]>][]) {
+        const locked = def.skill && !g.has(def.skill);
+        const n = locked ? 0 : g.buildSpots(type).length;
+        h += `<button class="build-opt ${locked || !n ? 'locked' : ''}" data-act="buildMode" data-arg="${type}" ${locked || !n ? 'disabled' : ''}>
+          <div class="bo-emoji">${def.emoji}</div><div class="bo-name">${def.name}</div><div class="bo-cost">a partir de ${money(def.cost + def.w * 120)}</div>
+          <div class="bo-desc">${locked ? '🔒 ' + SKILL_MAP[def.skill!].name : !n ? 'Sem espaço no terreno' : `${def.w / 2}m · ${n} encaixe(s) · ${def.desc}`}</div></button>`;
+      }
+      h += '</div>';
     }
     return h;
+  }
+
+  // ------------------------------------------------------------ build mode (prefab spots)
+  buildType: RoomType | null = null;
+  spots: BuildSpot[] = [];
+  buildBar: HTMLElement | null = null;
+
+  startBuildMode(type: RoomType) {
+    const g = this.g;
+    this.spots = g.buildSpots(type);
+    if (!this.spots.length) return;
+    this.buildType = type;
+    this.openPanel(null);
+    g.scene.ghosts = this.spots.map((sp, k) => ({ id: k, side: sp.side, col: sp.col, w: sp.w, h: sp.h, label: ROOM_TYPES[type]!.emoji }));
+    g.scene.focusBuilding(g.layout, this.spots);
+    this.buildBar?.remove();
+    const bar = document.createElement('div');
+    bar.className = 'build-bar';
+    bar.innerHTML = `<span>${ROOM_TYPES[type]!.emoji} Onde construir a <b>${ROOM_TYPES[type]!.name}</b>? Toque num encaixe tracejado.</span>
+      <div class="bb-list">${this.spots.map((sp, k) => `<button class="btn small" data-act="buildSpot" data-arg="${k}">${sp.label} · ${money(sp.cost)}</button>`).join('')}</div>
+      <button class="btn small ghost" data-act="cancelBuild">Cancelar</button>`;
+    this.root.appendChild(bar);
+    this.buildBar = bar;
+  }
+
+  confirmSpot(k: number) {
+    const sp = this.spots[k];
+    const type = this.buildType;
+    if (!sp || !type) return;
+    const id = this.g.buildAt(type, sp);
+    this.endBuildMode();
+    if (id !== undefined) this.openPanel('room', id);
+  }
+
+  endBuildMode() {
+    this.buildType = null;
+    this.spots = [];
+    this.g.scene.ghosts = [];
+    this.buildBar?.remove();
+    this.buildBar = null;
+    this.g.scene.focusBuilding(this.g.layout);
   }
 
   // ------------------------------------------------------------ events
@@ -208,6 +266,7 @@ export class UI implements UIHooks {
     if (act !== 'speed') sfx.click();
     switch (act) {
       case 'close': this.openPanel(null); break;
+      case 'objToggle': this.objCollapsed = !this.objCollapsed; this.renderObjective(); break;
       case 'panel':
         if (arg === 'skills') { this.toggleSkills(); break; }
         if (arg === 'school') {
@@ -226,10 +285,12 @@ export class UI implements UIHooks {
       case 'sfx': setSfx(!isSfxOn()); break;
       case 'menu': this.menu(); break;
       case 'fullscreen': if (document.fullscreenElement) document.exitFullscreen?.(); else (window as any).__fullscreen?.(); break;
-      case 'rent': g.rentPlot(Number(arg)); this.openPanel('room', Number(arg)); break;
+      case 'buildMode': this.startBuildMode(arg as RoomType); break;
+      case 'buildSpot': this.confirmSpot(Number(arg)); break;
+      case 'cancelBuild': this.endBuildMode(); break;
+      case 'walls': g.upgradeWalls(Number(arg)); this.renderPanel(); break;
       case 'item': { const [i, it] = arg.split(':'); g.buyItem(Number(i), it as any); this.renderPanel(); break; }
       case 'reception': g.buildReception(); this.renderPanel(); break;
-      case 'build': { const [i, t] = arg.split(':'); g.buildRoom(Number(i), t as any); this.renderPanel(); break; }
       case 'decor': g.upgradeDecor(Number(arg)); this.renderPanel(); break;
       case 'equip': { const [i, inst, t] = arg.split(':'); g.buyEquip(Number(i), inst as InstrumentId, Number(t)); this.renderPanel(); break; }
       case 'unequip': { const [i, inst] = arg.split(':'); g.removeEquip(Number(i), inst as InstrumentId); this.renderPanel(); break; }
@@ -331,10 +392,10 @@ export class UI implements UIHooks {
     t.className = 'toast ' + kind;
     t.innerHTML = text;
     this.toastsEl.prepend(t);
-    const maxT = window.innerHeight <= 520 ? 2 : 5;
+    const maxT = window.innerHeight <= 520 ? 2 : 3;
     while (this.toastsEl.children.length > maxT) this.toastsEl.lastElementChild?.remove();
-    setTimeout(() => t.classList.add('out'), 4200);
-    setTimeout(() => t.remove(), 4700);
+    setTimeout(() => t.classList.add('out'), 3600);
+    setTimeout(() => t.remove(), 4100);
   }
 
   dialog(lines: DialogLine[]): Promise<void> {
@@ -538,10 +599,12 @@ export class UI implements UIHooks {
           <div><small>Matrículas</small><b class="green">+${st.enrolled}</b></div>
           <div><small>Cancelamentos</small><b class="red">-${st.churned}</b></div>
           <div><small>Perdidos (sem vaga)</small><b class="${st.lostCap ? 'red' : ''}">${st.lostCap}</b></div>
+          ${st.noise ? `<div><small>Aulas com barulho</small><b class="red">${st.noise}</b></div>` : ''}
         </div>
         <details><summary>Detalhes do caixa</summary>${led.map(([k, v]) => `<div class="kv small"><span>${k}</span><b class="${v >= 0 ? 'green' : 'red'}">${money(v)}</b></div>`).join('')}</details>
         <div class="kv total"><span>📈 Lucro previsto p/ próxima semana</span><b class="${extra.forecast >= 0 ? 'green' : 'red'}">${money(extra.forecast)}</b></div>
         ${st.lostCap >= 3 ? '<div class="alert">⚠️ Você perdeu alunos por falta de vaga. Veja 📊 Demanda: contrate professores ou equipe salas.</div>' : ''}
+        ${(st.noise ?? 0) >= 3 ? '<div class="alert">🔊 Muitas aulas atrapalhadas por som vindo da sala ao lado. Troque as paredes por isolamento.</div>' : ''}
         <button class="btn primary big ok">Continuar</button>`, 'report');
       (ov.querySelector('.ok') as HTMLElement).onclick = () => { this.closeModal(ov); resolve(); };
     });

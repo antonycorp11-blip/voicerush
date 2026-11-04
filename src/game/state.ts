@@ -52,7 +52,12 @@ export interface Contract {
 }
 
 export interface Plot {
-  index: number;
+  index: number; // room id (== position in GameState.plots)
+  side: 'top' | 'bottom';
+  col: number;
+  w: number;
+  h: number;
+  walls: number; // 0 simples, 1 isolamento, 2 isolamento profissional
   owned: boolean;
   type: RoomType;
   decor: number;
@@ -91,6 +96,7 @@ export interface WeekStats {
   lostCap: number;
   lostPrice: number;
   churned: number;
+  noise?: number;
   lessons: number;
   quality: number; // sum
   byInst: Record<InstrumentId, InstStats>;
@@ -189,9 +195,8 @@ export function firstName(full: string) {
 
 export function newGame(name: string, look: Look, instruments: InstrumentId[]): GameState {
   const plots: Plot[] = [];
-  for (let i = 0; i < 8; i++) plots.push({ index: i, owned: false, type: 'empty', decor: 0, equip: {}, items: [] });
   const s: GameState = {
-    version: 1,
+    version: 2,
     playerName: name,
     playerLook: look,
     playerInstruments: instruments,
@@ -261,9 +266,9 @@ export function loadGame(): GameState | null {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw) as GameState;
-    if (s.version !== 1) return null;
+    if (s.version !== 2) return null;
     s.building = s.building ?? 1;
-    for (const p of s.plots) p.items = p.items ?? [];
+    for (const p of s.plots) { p.items = p.items ?? []; p.walls = p.walls ?? 0; }
     return s;
   } catch { return null; }
 }

@@ -25,7 +25,7 @@ export const TRAITS: Record<TraitId, { name: string; desc: string; good: boolean
   mentor: { name: 'Mentor', desc: 'Reuniões rendem o dobro.', good: true },
 };
 
-export type RoomType = 'empty' | 'hall' | 'reception' | 'classroom' | 'rehearsal' | 'auditorium' | 'lounge' | 'studio' | 'office';
+export type RoomType = 'empty' | 'hall' | 'reception' | 'classroom' | 'booth' | 'rehearsal' | 'auditorium' | 'lounge' | 'studio' | 'office';
 
 export interface RoomTypeDef {
   name: string;
@@ -33,17 +33,27 @@ export interface RoomTypeDef {
   cost: number;
   desc: string;
   skill?: string;
+  w: number; // width in cells (16px)
+  h: number; // height in cells when built on the back side of the corridor
+  topOnly?: boolean;
+  loud: number; // how much sound it leaks when in use
 }
 export const ROOM_TYPES: Partial<Record<RoomType, RoomTypeDef>> = {
-  classroom: { name: 'Sala de Aula', emoji: '🎼', cost: 3000, desc: 'Até 3 instrumentos. 60 horas-aula por semana.' },
-  rehearsal: { name: 'Sala de Ensaio', emoji: '🎚️', cost: 6000, desc: 'Bandas alugam por hora à noite e aos sábados.', skill: 'ensaio' },
-  lounge: { name: 'Café & Lounge', emoji: '☕', cost: 5000, desc: '+6 satisfação para todos e vende cafés.', skill: 'lounge' },
-  auditorium: { name: 'Auditório', emoji: '🎭', cost: 14000, desc: 'Recitais muito melhores e mais baratos.', skill: 'auditorio' },
-  studio: { name: 'Estúdio de Gravação', emoji: '🎙️', cost: 16000, desc: 'Gravações pagas + vídeos melhores.', skill: 'estudio' },
+  classroom: { name: 'Sala de Aula', emoji: '🎼', cost: 3000, w: 8, h: 7, loud: 1, desc: 'Até 3 instrumentos. Cresce quando sobe de nível.' },
+  booth: { name: 'Cabine de Ensaio', emoji: '🥁', cost: 3500, w: 5, h: 6, loud: 3, desc: 'Estúdio de ensaio pequeno: cabe no intervalo entre duas salas. Bandas alugam por hora.', skill: 'ensaio' },
+  rehearsal: { name: 'Sala de Ensaio Grande', emoji: '🎚️', cost: 7000, w: 10, h: 8, loud: 3, desc: 'Palquinho, PA e bateria. Bandas pagam mais por hora.', skill: 'ensaio' },
+  lounge: { name: 'Café & Lounge', emoji: '☕', cost: 5000, w: 8, h: 7, loud: 0.4, desc: '+3 satisfação semanal para todos e vende cafés.', skill: 'lounge' },
+  auditorium: { name: 'Auditório', emoji: '🎭', cost: 14000, w: 14, h: 10, loud: 2.5, topOnly: true, desc: 'Palco com público. Recitais melhores e mais baratos. Só cabe no lado de trás.', skill: 'auditorio' },
+  studio: { name: 'Estúdio de Gravação', emoji: '🎙️', cost: 16000, w: 9, h: 8, loud: 1, desc: 'Gravações pagas + vídeos melhores. Precisa de silêncio!', skill: 'estudio' },
 };
 
-export const PLOT_RENT = 150; // per week per rented plot
-export const PLOT_DEPOSIT = 1500; // to rent a new space
+export const RENT_PER_CELL = 18; // weekly rent per cell of width
+export const BUILD_PER_CELL = 120; // construction cost per cell of width
+export const WALL_NAMES = ['Parede simples', 'Com isolamento', 'Isolamento profissional'];
+export const WALL_COST = [0, 900, 2600];
+export const WALL_SKILL = [null, null, 'acustica'];
+/** Land available in each building (columns) and max height of back rooms. */
+export const LAND = { 1: { min: 16, max: 62, maxH: 10 }, 2: { min: 2, max: 78, maxH: 11 } } as const;
 export const DECOR_COST = [0, 1200, 3500, 8500, 18000];
 export const DECOR_SKILL = [null, 'pintura', 'acustica', 'premium', 'conforto'];
 export const DECOR_NAMES = ['Abandonado', 'Pintado', 'Aconchegante', 'Premium', 'Luxo'];
@@ -61,9 +71,9 @@ export interface ItemDef { name: string; emoji: string; cost: number; desc: stri
 /** Prefab items: each one has a fixed place in the room and follows the room level visually. */
 export const ROOM_ITEMS: Record<ItemId, ItemDef> = {
   cadeiras: { name: 'Cadeiras', emoji: '🪑', cost: 300, desc: '+1 satisfação por aula. Necessárias para turmas confortáveis.', types: ['classroom', 'auditorium', 'lounge'] },
-  som: { name: 'Caixas de som', emoji: '🔊', cost: 500, desc: '+2 qualidade nas aulas / mais reservas.', types: ['classroom', 'rehearsal', 'auditorium', 'studio', 'reception', 'lounge'] },
-  clima: { name: 'Climatização', emoji: '❄️', cost: 600, desc: '+1 satisfação por aula (ninguém sofre no calor).', types: ['classroom', 'rehearsal', 'reception', 'lounge', 'auditorium', 'studio'] },
-  luz: { name: 'Iluminação', emoji: '💡', cost: 350, desc: '+2 qualidade / ambiente mais bonito.', types: ['classroom', 'rehearsal', 'reception', 'lounge', 'auditorium', 'studio'] },
+  som: { name: 'Caixas de som', emoji: '🔊', cost: 500, desc: '+2 qualidade nas aulas / mais reservas.', types: ['classroom', 'booth', 'rehearsal', 'auditorium', 'studio', 'reception', 'lounge'] },
+  clima: { name: 'Climatização', emoji: '❄️', cost: 600, desc: '+1 satisfação por aula (ninguém sofre no calor).', types: ['classroom', 'booth', 'rehearsal', 'reception', 'lounge', 'auditorium', 'studio'] },
+  luz: { name: 'Iluminação', emoji: '💡', cost: 350, desc: '+2 qualidade / ambiente mais bonito.', types: ['classroom', 'booth', 'rehearsal', 'reception', 'lounge', 'auditorium', 'studio'] },
   estante: { name: 'Estante de partituras', emoji: '📚', cost: 400, desc: '+2 qualidade nas aulas.', types: ['classroom', 'studio'] },
   plantas: { name: 'Plantas', emoji: '🪴', cost: 150, desc: '+1 satisfação. Deixa tudo mais vivo.', types: ['classroom', 'reception', 'lounge', 'rehearsal', 'studio', 'auditorium'] },
   sofa: { name: 'Sofá de espera', emoji: '🛋️', cost: 700, desc: 'Interessados esperam mais e convertem melhor.', types: ['reception', 'studio', 'lounge'] },
@@ -120,7 +130,7 @@ export const SKILLS: SkillDef[] = [
   { id: 'mestre', name: 'Metodologia de Referência', branch: 'pedagogia', tier: 5, cost: 3, req: ['coordenador'], desc: '+10% qualidade e alunos aceitam preços 15% maiores.' },
   // Ambiente
   { id: 'pintura', name: 'Reforma Básica', branch: 'ambiente', tier: 1, cost: 1, req: [], desc: 'Libera decoração nível 1 (pintura e piso de madeira).' },
-  { id: 'acustica', name: 'Tratamento Acústico', branch: 'ambiente', tier: 2, cost: 1, req: ['pintura'], desc: 'Decoração nível 2. Bateria sem reclamação de vizinhos.' },
+  { id: 'acustica', name: 'Tratamento Acústico', branch: 'ambiente', tier: 2, cost: 1, req: ['pintura'], desc: 'Decoração nível 2 e libera paredes com isolamento profissional. Bateria sem reclamação de vizinhos.' },
   { id: 'lounge', name: 'Café & Lounge', branch: 'ambiente', tier: 2, cost: 2, req: ['pintura'], desc: 'Libera construir um Café & Lounge.', minChapter: 3 },
   { id: 'premium', name: 'Design Premium', branch: 'ambiente', tier: 3, cost: 2, req: ['acustica'], desc: 'Decoração nível 3: o ambiente mais bonito da cidade.' },
   { id: 'conforto', name: 'Experiência Premium', branch: 'ambiente', tier: 4, cost: 3, req: ['premium'], desc: 'Decoração nível 4 (Luxo), +4 satisfação semanal e alunos aceitam preços 10% maiores.' },
@@ -141,14 +151,14 @@ export const SKILLS: SkillDef[] = [
   { id: 'precificacao', name: 'Venda Consultiva', branch: 'gestao', tier: 4, cost: 2, req: ['vendedor'], desc: '+10% de conversão em matrículas.' },
   // Palco
   { id: 'recital', name: 'Recitais', branch: 'palco', tier: 1, cost: 1, req: [], desc: 'Libera organizar recitais (satisfação + reputação).' },
-  { id: 'ensaio', name: 'Sala de Ensaio', branch: 'palco', tier: 2, cost: 1, req: ['recital'], desc: 'Libera construir Sala de Ensaio para alugar a bandas.', minChapter: 3 },
+  { id: 'ensaio', name: 'Salas de Ensaio', branch: 'palco', tier: 2, cost: 1, req: ['recital'], desc: 'Libera Cabine de Ensaio e Sala de Ensaio Grande para alugar a bandas.', minChapter: 3 },
   { id: 'auditorio', name: 'Auditório', branch: 'palco', tier: 2, cost: 2, req: ['recital'], desc: 'Libera construir um Auditório.', minChapter: 3 },
   { id: 'estudio', name: 'Estúdio de Gravação', branch: 'palco', tier: 3, cost: 2, req: ['ensaio'], desc: 'Libera construir Estúdio de Gravação.' },
   { id: 'festival', name: 'Festival Anual', branch: 'palco', tier: 3, cost: 3, req: ['auditorio'], desc: 'Recitais viram festivais: o dobro de efeito.' },
   // Expansão
-  { id: 'expansao1', name: 'Novos Espaços', branch: 'expansao', tier: 1, cost: 1, req: [], desc: 'Libera alugar as salas do andar de cima (2 espaços).', minChapter: 3 },
+  { id: 'expansao1', name: 'Novos Espaços', branch: 'expansao', tier: 1, cost: 1, req: [], desc: 'Libera construir do lado de trás do corredor.', minChapter: 3 },
   { id: 'corporativo', name: 'Aulas Corporativas', branch: 'expansao', tier: 2, cost: 2, req: ['expansao1'], desc: 'Empresas contratam turmas fechadas (ticket alto).' },
-  { id: 'expansao2', name: 'Prédio Inteiro', branch: 'expansao', tier: 2, cost: 2, req: ['expansao1'], desc: 'Libera os 2 últimos espaços do prédio.' },
+  { id: 'expansao2', name: 'Salas Grandes', branch: 'expansao', tier: 2, cost: 2, req: ['expansao1'], desc: 'Salas podem crescer até o tamanho máximo (níveis 4 e 5).' },
   { id: 'filial', name: 'Abrir Filial', branch: 'expansao', tier: 3, cost: 4, req: ['expansao2', 'corporativo'], desc: 'O grande sonho: abrir a segunda unidade. Requer nível 8 e R$ 60.000 em caixa.' },
 ];
 

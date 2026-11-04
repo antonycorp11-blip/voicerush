@@ -6,8 +6,8 @@ import type { InstrumentId } from '../data/instruments';
 import { INSTRUMENT_IDS, INSTRUMENTS } from '../data/instruments';
 import type { RoomType } from '../data/content';
 import {
-  Layout, WORLD_W, WORLD_H, PLOT_W, TOP_WALL_Y, WALL_FACE, TOP_FLOOR_END, BOT_WALL_Y, FRONT_Y,
-  SIDEWALK_Y, ROAD_Y, plotFloor, plotWall, plotRow, plotCx, plotArea, Pt, Rect,
+  Layout, WORLD_W, WORLD_H, WALL_FACE, TOP_FLOOR_END, BOT_WALL_Y, FRONT_Y, CELL, CORR_TOP, CORR_H,
+  SIDEWALK_Y, ROAD_Y, plotFloor, plotWall, plotRow, plotCx, plotArea, roomTopY, Pt, Rect,
 } from './layout';
 
 export interface PlotView {
@@ -19,6 +19,7 @@ export interface PlotView {
   rentable?: boolean;
   shared?: boolean; // building hall used but not owned
   items?: string[];
+  walls?: number;
 }
 
 export interface SceneModel {
@@ -30,7 +31,7 @@ export interface SceneModel {
   building?: number;
 }
 
-export type Bubble = 'q' | 'note' | 'excl' | 'zz' | 'heart' | 'coin' | 'sad' | null;
+export type Bubble = 'q' | 'note' | 'excl' | 'zz' | 'heart' | 'coin' | 'sad' | 'noise' | null;
 
 export interface Agent {
   id: number;
@@ -104,6 +105,12 @@ export class Scene {
   highlightPlots: Set<number> = new Set();
   plotLabels: Map<number, string> = new Map();
   dpr = 1;
+  camX = 320;
+  camY = 220;
+  viewW = 640;
+  viewH = 360;
+  focusKey = '';
+  ghosts: { id: number; side: 'top' | 'bottom'; col: number; w: number; h: number; label: string }[] = [];
   railX = 0;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -126,12 +133,30 @@ export class Scene {
     const h = this.canvas.clientHeight;
     this.canvas.width = Math.round(w * dpr);
     this.canvas.height = Math.round(h * dpr);
-    const fit = Math.min(this.canvas.width / WORLD_W, this.canvas.height / (WORLD_H - 40));
     const rail = h <= 520 ? 68 * dpr : 0;
     this.railX = -rail / 2;
-    const fit2 = Math.min((this.canvas.width - rail) / WORLD_W, this.canvas.height / (WORLD_H - 40));
-    this.scale = Math.max(1, Math.floor(Math.min(fit, fit2 + 0.25) * 2) / 2) + this.zoom;
+    const fit = Math.min((this.canvas.width - rail) / this.viewW, this.canvas.height / this.viewH);
+    this.scale = Math.max(1, Math.floor(fit * 2) / 2) + this.zoom;
     this.g.imageSmoothingEnabled = false;
+  }
+
+  /** Frame the camera on the school (it grows sideways, so the view follows). */
+  focusBuilding(L: Layout, extra: { side: 'top' | 'bottom'; col: number; w: number; h: number }[] = []) {
+    let bx0 = L.minCol * CELL, bx1 = L.maxCol * CELL;
+    let top = CORR_TOP - WALL_FACE - 8;
+    for (const r of [...L.rooms.values(), ...extra]) {
+      if (r.side === 'top') top = Math.min(top, roomTopY(r) - 8);
+      bx0 = Math.min(bx0, r.col * CELL); bx1 = Math.max(bx1, (r.col + r.w) * CELL);
+    }
+    const bottom = ROAD_Y + 20;
+    this.viewW = Math.max(560, bx1 - bx0 + 96);
+    this.viewH = Math.max(330, bottom - top);
+    this.camX = (bx0 + bx1) / 2;
+    this.camY = (top + bottom) / 2;
+    this.panX = this.panY = 0;
+    this.zoom = 0;
+    this.focusKey = extra.length ? 'ghost' : `${bx0}|${bx1}|${top}`;
+    this.resize();
   }
 
   setZoom(delta: number) {
@@ -143,6 +168,10 @@ export class Scene {
     if (this.world.width !== WORLD_W) { [this.world, this.wg] = makeCanvas(WORLD_W, WORLD_H); this.resize(); }
     const key = m.version + '|' + night + '|' + WORLD_W;
     this.model = m;
+    const L = m.layout;
+    let top = CORR_TOP;
+    for (const r of L.rooms.values()) if (r.side === 'top') top = Math.min(top, roomTopY(r));
+    if (this.focusKey !== 'ghost' && `${L.minCol * CELL}|${L.maxCol * CELL}|${top - 8}` !== this.focusKey) this.focusBuilding(L);
     if (key === this.staticKey && this.staticLayer) return;
     this.staticKey = key;
     this.buildStatic(night);
@@ -186,52 +215,90 @@ export class Scene {
       g.drawImage(P.tree(i), x, -14 + Math.floor(hash(i, 2, 4) * 8));
     }
 
-    const bx0 = L.x0;
-    const bx1 = L.x0 + L.cols * PLOT_W;
-    // building shadow on grass
-    g.fillStyle = 'rgba(40,50,30,0.18)';
-    g.fillRect(bx1, TOP_WALL_Y, 6, FRONT_Y - TOP_WALL_Y + 8);
+    const bx0 = L.minCol * CELL;
+    const bx1 = L.maxCol * CELL;
+    const geo = [...L.rooms.values()];
+    const topCover = (x: number) => geo.some((r) => r.side === 'top' && x >= r.col * CELL && x < (r.col + r.w) * CELL);
+    const botCover = (x: number) => geo.some((r) => r.side === 'bottom' && x >= r.col * CELL && x < (r.col + r.w) * CELL);
+    const topY = Math.min(CORR_TOP - WALL_FACE, ...geo.filter((r) => r.side === 'top').map((r) => roomTopY(r)));
+    // garden trees around the school (never under it)
+    for (let x = 8; x < WORLD_W - 20; x += 72) {
+      const k = Math.floor(x / 72);
+      const tx = x + Math.floor(hash(k, 9, 3) * 30);
+      const ty = 60 + Math.floor(hash(k, 4, 3) * 150);
+      const timg = P.tree(k);
+      const inside = tx + timg.width > bx0 - 6 && tx < bx1 + 6 && ty + timg.height > topY - 8;
+      if (!inside) g.drawImage(timg, tx, ty);
+      if (tx + 18 < bx0 - 10 || tx > bx1 + 10) g.drawImage(P.bush(k), tx + 6, FRONT_Y - 20);
+    }
+    // building shadow
+    g.fillStyle = 'rgba(40,50,30,0.16)';
+    g.fillRect(bx1 + 2, topY, 6, FRONT_Y - topY + 8);
 
-    // corridor
-    const hallPlot = m.plots[L.hall];
-    const ct = hallPlot.owned ? Math.max(1, hallPlot.decor) : 0;
-    this.drawFloor(p, { x: bx0, y: TOP_FLOOR_END, w: bx1 - bx0, h: BOT_WALL_Y - TOP_FLOOR_END }, ct, 99, true);
+    // corridor floor
+    const hallPlot = m.plots.find((x) => x.index === L.hall) ?? m.plots[0];
+    const ct = hallPlot && hallPlot.owned ? Math.max(1, hallPlot.decor) : 0;
+    this.drawFloor(p, { x: bx0, y: CORR_TOP, w: bx1 - bx0, h: CORR_H }, ct, 99, true);
+    // corridor back wall where there is no room behind it (interior face with windows)
+    for (let x = bx0; x < bx1; x += CELL) {
+      if (topCover(x)) continue;
+      let x2 = x; while (x2 < bx1 && !topCover(x2)) x2 += CELL;
+      this.drawWall(p, { x, y: CORR_TOP - WALL_FACE, w: x2 - x, h: WALL_FACE }, ct, x, '#f2c14e');
+      for (let wx = x + 6; wx + 22 < x2; wx += 48) g.drawImage(P.windowSprite(night), wx, CORR_TOP - WALL_FACE + 6);
+      p.rect(x, CORR_TOP - WALL_FACE - 4, x2 - x, 4, '#5e4b56');
+      p.hl(x, CORR_TOP - WALL_FACE - 4, x2 - x, '#7a6670');
+      x = x2 - CELL;
+    }
+    // little gardens in the gaps between street-side rooms
+    for (let x = bx0; x < bx1; x += CELL) {
+      if (botCover(x)) continue;
+      let x2 = x; while (x2 < bx1 && !botCover(x2)) x2 += CELL;
+      p.rect(x, BOT_WALL_Y + 8, x2 - x, FRONT_Y - BOT_WALL_Y - 8, '#86bd5e');
+      for (let yy = BOT_WALL_Y + 20; yy < FRONT_Y - 10; yy += 8) for (let xx = x + 4; xx < x2 - 4; xx += 6) if (hash(xx, yy, 5) < 0.3) p.px(xx, yy, '#a6d67a');
+      g.drawImage(P.bush(x), x + (x2 - x) / 2 - 9, FRONT_Y - 24);
+      if (x2 - x >= 48) g.drawImage(P.tree(x), x + (x2 - x) / 2 - 15, BOT_WALL_Y + 8);
+      x = x2 - CELL;
+    }
 
-    // plots
+    // rooms
     for (const pv of m.plots) this.drawPlotStatic(p, g, pv, night);
 
-    // outer walls: caps
-    const cap = '#5e4b56';
-    const capL = '#7a6670';
-    p.rect(bx0 - 3, TOP_WALL_Y - 5, bx1 - bx0 + 6, 5, cap);
-    p.hl(bx0 - 3, TOP_WALL_Y - 5, bx1 - bx0 + 6, capL);
-    p.rect(bx0 - 3, TOP_WALL_Y - 5, 4, FRONT_Y - TOP_WALL_Y + 13, cap);
-    p.rect(bx1 - 1, TOP_WALL_Y - 5, 4, FRONT_Y - TOP_WALL_Y + 13, cap);
-    p.vl(bx0 - 3, TOP_WALL_Y - 5, FRONT_Y - TOP_WALL_Y + 13, capL);
-    // interior side walls between plots
-    for (let col = 1; col < L.cols; col++) {
-      const x = bx0 + col * PLOT_W - 2;
-      p.rect(x, TOP_WALL_Y - 4, 4, TOP_FLOOR_END - TOP_WALL_Y + 4, cap);
-      p.vl(x, TOP_WALL_Y - 4, TOP_FLOOR_END - TOP_WALL_Y + 4, capL);
-      p.rect(x, BOT_WALL_Y - 4, 4, FRONT_Y - BOT_WALL_Y + 4, cap);
-      p.vl(x, BOT_WALL_Y - 4, FRONT_Y - BOT_WALL_Y + 4, capL);
+    // walls: caps around each room; shared walls show their acoustic level
+    const wallsOf = (id: number) => m.plots.find((x) => x.index === id)?.walls ?? 0;
+    for (const r of geo) {
+      const y0 = roomTopY(r) - (r.side === 'top' ? 5 : 4);
+      const y1 = r.side === 'top' ? CORR_TOP : FRONT_Y;
+      const x0 = r.col * CELL, x1 = (r.col + r.w) * CELL;
+      if (r.side === 'top') { p.rect(x0 - 2, y0, x1 - x0 + 4, 5, '#5e4b56'); p.hl(x0 - 2, y0, x1 - x0 + 4, '#7a6670'); }
+      const lvlL = Math.max(wallsOf(r.id), ...geo.filter((o) => o.side === r.side && o.col + o.w === r.col).map((o) => wallsOf(o.id)));
+      const lvlR = Math.max(wallsOf(r.id), ...geo.filter((o) => o.side === r.side && o.col === r.col + r.w).map((o) => wallsOf(o.id)));
+      this.capV(p, x0, y0, y1, lvlL);
+      this.capV(p, x1, y0, y1, lvlR);
     }
-    // bottom row back-wall caps (corridor south edge)
-    p.rect(bx0, BOT_WALL_Y - 4, bx1 - bx0, 4, cap);
-    p.hl(bx0, BOT_WALL_Y - 4, bx1 - bx0, capL);
+    // corridor south edge cap where street-side rooms are
+    for (const r of geo) if (r.side === 'bottom') { p.rect(r.col * CELL, BOT_WALL_Y - 4, r.w * CELL, 4, '#5e4b56'); p.hl(r.col * CELL, BOT_WALL_Y - 4, r.w * CELL, '#7a6670'); }
+    // corridor ends
+    this.capV(p, bx0, CORR_TOP - WALL_FACE - 4, BOT_WALL_Y + 4, 0);
+    this.capV(p, bx1, CORR_TOP - WALL_FACE - 4, BOT_WALL_Y + 4, 0);
 
-    // bushes & benches & sidewalk stuff left/right of building
-    const sideStuff = (x: number, k: number) => {
-      g.drawImage(P.tree(k + 3), x - 15, 120 + (k % 2) * 60);
-      g.drawImage(P.bush(k), x - 9, 300);
-      g.drawImage(P.bush(k + 1), x - 2, 90 + k * 13);
-    };
-    if (bx0 > 40) { sideStuff(bx0 / 2, 1); sideStuff(bx0 / 2 - 14, 4); }
-    if (WORLD_W - bx1 > 40) { sideStuff(bx1 + (WORLD_W - bx1) / 2, 2); sideStuff(bx1 + (WORLD_W - bx1) / 2 + 12, 5); }
     for (let x = 6; x < WORLD_W; x += 160) g.drawImage(P.bench(), x, sw + 2);
 
     this.staticLayer = c;
     this.buildProps(night);
+  }
+
+  /** Vertical wall cap; level shows acoustic insulation (0 simple, 1 foam, 2 pro). */
+  capV(p: Painter, x: number, y0: number, y1: number, level: number) {
+    const h = y1 - y0;
+    if (level <= 0) { p.rect(x - 2, y0, 4, h, '#5e4b56'); p.vl(x - 2, y0, h, '#7a6670'); return; }
+    if (level === 1) {
+      p.rect(x - 3, y0, 6, h, '#5a3e6a'); p.vl(x - 3, y0, h, '#7a5e8a');
+      for (let y = y0 + 2; y < y1 - 1; y += 3) p.px(x + (y % 2), y, '#9a7aba');
+      return;
+    }
+    p.rect(x - 4, y0, 8, h, '#6a4028'); p.vl(x - 4, y0, h, '#9a6440'); p.vl(x + 3, y0, h, '#4a2a1a');
+    p.rect(x - 1, y0, 2, h, '#5a3e6a');
+    for (let y = y0 + 3; y < y1 - 1; y += 6) p.px(x, y, '#e8c25a');
   }
 
   drawFloor(p: Painter, r: Rect, tier: number, seed: number, corridor = false) {
@@ -519,6 +586,16 @@ export class Scene {
           sp.staff.push({ x: cx + 10, y: fy + 20 });
           break;
         }
+        case 'booth': {
+          const t = Math.min(2, Math.max(0, tier - 1));
+          add(P.drumKit(t), cx - 6, fy + 30);
+          add(P.amp(t), fx + 10, fy + 52);
+          add(P.micStand(t), fx + fw - 10, fy + 44);
+          if (has('som')) add(P.speakerL(tier), fx + 6, fy + 24);
+          if (has('plantas')) add(plantImg(), fx + fw - 6, fy + fh - 2);
+          sp.band.push({ x: cx - 6, y: fy + 22 }, { x: fx + fw - 12, y: fy + 40 }, { x: fx + 22, y: fy + 50 });
+          break;
+        }
         case 'rehearsal': {
           const t = Math.min(2, Math.max(0, tier - 1));
           add(P.drumKit(t), cx - 26, fy + 30);
@@ -553,10 +630,13 @@ export class Scene {
           else { add(P.speaker(), fx + 14, fy + 18); add(P.speaker(), fx + fw - 14, fy + 18); }
           if (has('plantas')) { add(plantImg(), fx + 6, fy + fh - 2); add(plantImg(), fx + fw - 6, fy + fh - 2); }
           sp.stage.push({ x: cx - 24, y: fy + 4 }, { x: cx + 18, y: fy + 10 }, { x: cx, y: fy + 12 }, { x: cx - 8, y: fy + 8 });
-          for (let r = 0; r < 3; r++) for (let k = 0; k < 7; k++) {
-            if (k === 3) continue; // aisle
-            const x = fx + 14 + k * 16;
-            const y = fy + 42 + r * 12;
+          const ncol = Math.max(3, Math.min(9, Math.floor((fw - 16) / 20)));
+          const nrow = Math.max(2, Math.min(4, Math.floor((fh - 50) / 16)));
+          const aisle = Math.floor(ncol / 2);
+          for (let r = 0; r < nrow; r++) for (let k = 0; k < ncol; k++) {
+            if (k === aisle) continue; // aisle
+            const x = fx + 10 + k * 20 + (fw - 20 - ncol * 20) / 2;
+            const y = fy + 48 + r * 16;
             add(has('cadeiras') ? P.chairL(Math.max(1, tier), '#c24d6a') : P.audienceChair('#8a6a5a'), x, y);
             sp.audience.push({ x, y: y - 4 });
           }
@@ -706,9 +786,9 @@ export class Scene {
       gg.drawImage(sign, sx, SIDEWALK_Y - 28);
     } });
     // top-row front walls (with door gaps) & building facade
-    const bx0 = L.x0, bx1 = L.x0 + L.cols * PLOT_W;
     draws.push({ y: TOP_FLOOR_END + 1, draw: (gg) => this.drawFrontWalls(gg) });
-    draws.push({ y: FRONT_Y + 2, draw: (gg) => this.drawFacade(gg, bx0, bx1) });
+    draws.push({ y: BOT_WALL_Y + 1, draw: (gg) => this.drawGapWalls(gg) });
+    draws.push({ y: FRONT_Y + 2, draw: (gg) => this.drawFacade(gg) });
 
     draws.sort((a, b) => a.y - b.y);
     for (const d of draws) d.draw(g);
@@ -725,6 +805,18 @@ export class Scene {
       g.drawImage(p.img, Math.round(p.x), Math.round(p.y));
     }
     g.globalAlpha = 1;
+    // build-mode ghosts (prefab spots)
+    for (const gh of this.ghosts) {
+      const r = this.ghostRect(gh);
+      const a = 0.18 + (Math.sin(this.time * 4) + 1) * 0.08;
+      g.fillStyle = `rgba(110,220,130,${a})`;
+      g.fillRect(r.x, r.y, r.w, r.h);
+      g.strokeStyle = 'rgba(40,140,60,0.95)';
+      g.setLineDash([3, 2]);
+      g.lineWidth = 1;
+      g.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+      g.setLineDash([]);
+    }
     // hover/highlight
     for (const i of this.highlightPlots) this.outlinePlot(g, i, 'rgba(255,214,90,0.95)', true);
     if (this.hoverPlot >= 0) this.outlinePlot(g, this.hoverPlot, 'rgba(255,255,255,0.85)', false);
@@ -749,8 +841,8 @@ export class Scene {
     sg.fillRect(0, 0, cw, ch);
     const s = this.scale;
     const ww = WORLD_W * s, wh = WORLD_H * s;
-    this.ox = Math.round((cw - ww) / 2 + this.panX + this.railX);
-    this.oy = Math.round((ch - wh) / 2 + this.panY + 6 * this.dpr);
+    this.ox = Math.round(cw / 2 - this.camX * s + this.panX + this.railX);
+    this.oy = Math.round(ch / 2 - this.camY * s + this.panY);
     this.clampPan();
     sg.imageSmoothingEnabled = false;
     sg.drawImage(this.world, 0, 0, WORLD_W, WORLD_H, this.ox, this.oy, ww, wh);
@@ -770,6 +862,20 @@ export class Scene {
       sg.fillText(f.text, sx, sy);
     }
     sg.globalAlpha = 1;
+    // ghost labels
+    if (this.ghosts.length) {
+      const gfs = Math.max(14, Math.round(9 * s));
+      sg.font = `${gfs}px Silkscreen, monospace`;
+      for (const gh of this.ghosts) {
+        const r = this.ghostRect(gh);
+        const sx = this.ox + (r.x + r.w / 2) * s;
+        const sy = this.oy + (r.y + r.h / 2) * s;
+        sg.fillStyle = 'rgba(40,120,60,0.92)';
+        sg.beginPath(); sg.arc(sx, sy, gfs * 0.95, 0, Math.PI * 2); sg.fill();
+        sg.fillStyle = '#fff';
+        sg.fillText('+' + (gh.id + 1), sx, sy + gfs * 0.35);
+      }
+    }
     // plot labels
     if (this.plotLabels.size) {
       const lfs = Math.max(9, Math.round(4.2 * s));
@@ -790,8 +896,8 @@ export class Scene {
 
   clampPan() {
     const s = this.scale;
-    const maxX = Math.max(0, (WORLD_W * s - this.canvas.width) / 2 + 40);
-    const maxY = Math.max(0, (WORLD_H * s - this.canvas.height) / 2 + 80);
+    const maxX = Math.max(80, this.viewW * s * 0.6);
+    const maxY = Math.max(60, this.viewH * s * 0.5);
     this.panX = Math.max(-maxX, Math.min(maxX, this.panX));
     this.panY = Math.max(-maxY, Math.min(maxY, this.panY));
   }
@@ -819,48 +925,77 @@ export class Scene {
   }
 
   drawFrontWalls(g: CanvasRenderingContext2D) {
-    const L = this.model!.layout;
+    const m = this.model!;
+    const L = m.layout;
     const p = new Painter(g);
-    for (let c = 0; c < L.cols; c++) {
-      const x = L.x0 + c * PLOT_W;
-      const cx = x + PLOT_W / 2;
-      const y = TOP_FLOOR_END - 1;
-      const pv = this.model!.plots[c];
-      const face = pv.owned && pv.decor >= 2 ? '#b47a4a' : pv.owned && pv.decor === 1 ? '#d8c8a8' : '#b8a88e';
-      const seg = (x0: number, x1: number) => {
-        p.rect(x0, y, x1 - x0, 3, '#5e4b56');
-        p.hl(x0, y, x1 - x0, '#7a6670');
-        p.rect(x0, y + 3, x1 - x0, 4, face);
-        p.hl(x0, y + 6, x1 - x0, shade(face, -0.25));
+    const y = TOP_FLOOR_END - 1;
+    for (const r of L.rooms.values()) {
+      if (r.side !== 'top') continue;
+      const pv = m.plots.find((x) => x.index === r.id);
+      const x = r.col * CELL, x1 = (r.col + r.w) * CELL;
+      const cx = (x + x1) / 2;
+      const d = pv?.decor ?? 0;
+      const face = d >= 4 ? '#2c3458' : d >= 2 ? '#b47a4a' : d === 1 ? '#d8c8a8' : '#b8a88e';
+      const seg = (x0: number, xe: number) => {
+        p.rect(x0, y, xe - x0, 3, '#5e4b56');
+        p.hl(x0, y, xe - x0, '#7a6670');
+        p.rect(x0, y + 3, xe - x0, 4, face);
+        p.hl(x0, y + 6, xe - x0, shade(face, -0.25));
+        if (d >= 4) p.hl(x0, y + 3, xe - x0, '#e8c25a');
       };
-      seg(x - (c === 0 ? 3 : 2), cx - 10);
-      seg(cx + 10, x + PLOT_W + (c === L.cols - 1 ? 3 : 2));
+      seg(x - 2, cx - 10);
+      seg(cx + 10, x1 + 2);
     }
   }
 
-  drawFacade(g: CanvasRenderingContext2D, bx0: number, bx1: number) {
+  /** Corridor south wall where there is no street-side room (garden behind it). */
+  drawGapWalls(g: CanvasRenderingContext2D) {
     const L = this.model!.layout;
     const p = new Painter(g);
-    const hall = this.model!.plots[L.hall];
-    const nice = hall.owned && hall.decor >= 1;
+    const geo = [...L.rooms.values()];
+    const cover = (x: number) => geo.some((r) => r.side === 'bottom' && x >= r.col * CELL && x < (r.col + r.w) * CELL);
+    for (let x = L.minCol * CELL; x < L.maxCol * CELL; x += CELL) {
+      if (cover(x)) continue;
+      p.rect(x, BOT_WALL_Y - 4, CELL, 3, '#5e4b56');
+      p.hl(x, BOT_WALL_Y - 4, CELL, '#7a6670');
+      p.rect(x, BOT_WALL_Y - 1, CELL, 9, '#d8c8a8');
+      p.rect(x + 4, BOT_WALL_Y + 1, 8, 4, '#9fd4f2');
+      p.hl(x, BOT_WALL_Y + 7, CELL, '#a89878');
+    }
+  }
+
+  drawFacade(g: CanvasRenderingContext2D) {
+    const m = this.model!;
+    const L = m.layout;
+    const p = new Painter(g);
+    const hall = m.plots.find((x) => x.index === L.hall);
+    const nice = !!hall && hall.owned && hall.decor >= 1;
     const y = FRONT_Y;
-    const hx = plotCx(L, L.hall);
-    const modern = (this.model!.building ?? 1) >= 2;
-    const col = modern ? '#3a4a5e' : nice ? (hall.decor >= 3 ? '#3a2e3e' : '#e8dcc4') : '#b5a58c';
-    const seg = (x0: number, x1: number) => {
-      p.rect(x0, y - 1, x1 - x0, 3, '#5e4b56');
-      p.hl(x0, y - 1, x1 - x0, '#7a6670');
-      p.rect(x0, y + 2, x1 - x0, 7, col);
-      if (modern) for (let x = x0 + 2; x < x1 - 6; x += 10) { p.rect(x, y + 3, 7, 4, '#9fd4f2'); p.px(x + 1, y + 3, '#e8f6ff'); }
-      else if (!nice) for (let x = x0; x < x1; x += 8) { p.vl(x, y + 2, 7, shade(col, -0.12)); p.hl(x0, y + 5, x1 - x0, shade(col, -0.1)); }
-      p.hl(x0, y + 8, x1 - x0, shade(col, -0.3));
-    };
-    seg(bx0 - 3, hx - 12);
-    seg(hx + 12, bx1 + 3);
-    // door mat / glass door frame
-    p.rect(hx - 12, y + 6, 24, 3, nice ? '#c24d6a' : '#8a7a6a');
-    p.vl(hx - 12, y - 1, 9, '#5e4b56');
-    p.vl(hx + 11, y - 1, 9, '#5e4b56');
+    const modern = (m.building ?? 1) >= 2;
+    for (const r of L.rooms.values()) {
+      if (r.side !== 'bottom') continue;
+      const pv = m.plots.find((x) => x.index === r.id);
+      const d = pv?.decor ?? 0;
+      const col = modern ? '#3a4a5e' : d >= 4 ? '#2c3458' : d >= 3 ? '#3a2e3e' : d >= 1 ? '#e8dcc4' : '#b5a58c';
+      const x0 = r.col * CELL - 2, x1 = (r.col + r.w) * CELL + 2;
+      const seg = (a: number, b: number) => {
+        p.rect(a, y - 1, b - a, 3, '#5e4b56');
+        p.hl(a, y - 1, b - a, '#7a6670');
+        p.rect(a, y + 2, b - a, 7, col);
+        if (modern || d >= 2) for (let x = a + 3; x < b - 7; x += 12) { p.rect(x, y + 3, 7, 4, '#9fd4f2'); p.px(x + 1, y + 3, '#e8f6ff'); }
+        else if (d === 0) for (let x = a; x < b; x += 8) { p.vl(x, y + 2, 7, shade(col, -0.12)); }
+        if (d >= 4) p.hl(a, y + 2, b - a, '#e8c25a');
+        p.hl(a, y + 8, b - a, shade(col, -0.3));
+      };
+      if (r.id === L.hall) {
+        const hx = plotCx(L, r.id);
+        seg(x0, hx - 12);
+        seg(hx + 12, x1);
+        p.rect(hx - 12, y + 6, 24, 3, nice ? '#c24d6a' : '#8a7a6a');
+        p.vl(hx - 12, y - 1, 9, '#5e4b56');
+        p.vl(hx + 11, y - 1, 9, '#5e4b56');
+      } else seg(x0, x1);
+    }
   }
 
   // ------------------------------------------------------------------ input helpers
@@ -869,6 +1004,16 @@ export class Scene {
     const sx = (clientX - r.left) * this.dpr;
     const sy = (clientY - r.top) * this.dpr;
     return { x: (sx - this.ox) / this.scale, y: (sy - this.oy) / this.scale };
+  }
+
+  ghostRect(gh: { side: 'top' | 'bottom'; col: number; w: number; h: number }): Rect {
+    const y = gh.side === 'top' ? CORR_TOP - gh.h * CELL : BOT_WALL_Y;
+    return { x: gh.col * CELL, y, w: gh.w * CELL, h: (gh.side === 'top' ? CORR_TOP : FRONT_Y) - y };
+  }
+
+  ghostAt(pt: Pt): number {
+    for (const gh of this.ghosts) { const r = this.ghostRect(gh); if (pt.x >= r.x && pt.x < r.x + r.w && pt.y >= r.y && pt.y < r.y + r.h) return gh.id; }
+    return -1;
   }
 
   agentAt(pt: Pt): Agent | null {

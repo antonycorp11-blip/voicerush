@@ -4,7 +4,7 @@ import { BASE_PRICE, INVESTOR_LOOK } from '../game/game';
 import type { Teacher, Staff, Plot } from '../game/state';
 import { DAY_NAMES, firstName } from '../game/state';
 import { INSTRUMENTS, INSTRUMENT_IDS, InstrumentId } from '../data/instruments';
-import { CAMPAIGNS, CampaignId, DECOR_COST, DECOR_NAMES, DECOR_SKILL, DECOR_WHAT, MAX_DECOR, ROOM_ITEMS, ItemId, PLOT_DEPOSIT, PLOT_RENT, ROOM_TYPES, RoomType, SKILL_MAP, STAFF_ROLES, TRAITS } from '../data/content';
+import { CAMPAIGNS, CampaignId, DECOR_COST, DECOR_NAMES, DECOR_SKILL, DECOR_WHAT, MAX_DECOR, ROOM_ITEMS, ItemId, WALL_NAMES, WALL_COST, WALL_SKILL, ROOM_TYPES, RoomType, SKILL_MAP, STAFF_ROLES, TRAITS } from '../data/content';
 import { portraitURL } from '../art/characters';
 import { EVENT_DEFS } from '../game/events';
 
@@ -25,19 +25,9 @@ export function roomPanel(g: Game, i: number): string {
   const s = g.s;
   const p = s.plots[i];
   const L = g.layout;
-  let h = `<div class="ptitle">${p.owned && p.type !== 'empty' && p.type !== 'hall' ? (ROOM_TYPES[p.type]?.emoji ?? '🛎️') : '🏠'} ${roomName(g, p)} <small>espaço ${i + 1}</small></div>`;
+  let h = `<div class="ptitle">${p.owned && p.type !== 'empty' && p.type !== 'hall' ? (ROOM_TYPES[p.type]?.emoji ?? '🛎️') : '🏠'} ${roomName(g, p)} <small>${p.w * 16 / 32}m de largura</small></div>`;
   if (s.chapter === 1) return h + '<p class="muted">Este é o estúdio do Seu Válter. Você é só funcionário aqui… por enquanto.</p>';
-  if (!p.owned) {
-    if (i === L.hall) return h + '<p class="muted">Entrada do prédio, compartilhada com os vizinhos.</p>';
-    if (g.canRentPlot(i)) {
-      return h + `<p>Um espaço vazio, cheio de caixas. Alugue para expandir a escola.</p>
-        <div class="kv"><span>Caução</span><b>${money(PLOT_DEPOSIT)}</b></div>
-        <div class="kv"><span>Aluguel</span><b>${money(PLOT_RENT)}/semana</b></div>
-        <button class="btn primary wide" data-act="rent" data-arg="${i}">🔑 ${g.expandLabel(i)}</button>
-        <p class="muted small">Tudo é pré-moldado: depois de alugar, você só escolhe o tipo de sala e ela vem montada.</p>`;
-    }
-    return h + `<p class="muted">${s.chapter < 3 ? 'Por enquanto você só tem sua salinha.' : 'Só dá para expandir para espaços vizinhos aos seus. O andar de cima exige <b>Novos Espaços / Prédio Inteiro</b> (Expansão).'}</p>`;
-  }
+  if (!p.owned) return h + '<p class="muted">Entrada do prédio, compartilhada com os vizinhos. Sua escola por enquanto é só a salinha.</p>';
   const decorBlock = () => {
     const next = p.decor + 1;
     let d = `<div class="sect">Nível da sala: <b>${p.decor + 1}. ${DECOR_NAMES[p.decor]}</b> ${'✦'.repeat(p.decor + 1)}<span class="dim">${'✦'.repeat(MAX_DECOR - p.decor)}</span></div><div class="small muted">${DECOR_WHAT[p.decor]}</div>`;
@@ -46,7 +36,20 @@ export function roomPanel(g: Game, i: number): string {
       const locked = sk && !g.has(sk);
       d += `<button class="btn ${locked ? 'ghost' : 'accent'} wide" data-act="decor" data-arg="${i}" ${locked ? 'disabled' : ''}>⬆️ Subir para nível ${next + 1} "${DECOR_NAMES[next]}" — ${money(DECOR_COST[next])}<small>${locked ? `requer ${SKILL_MAP[sk!].name}` : DECOR_WHAT[next] + ' Todos os móveis acompanham o novo nível.'}</small></button>`;
     }
-    return d + itemsBlock();
+    return d + wallsBlock() + itemsBlock();
+  };
+  const wallsBlock = () => {
+    if (p.type === 'hall') return '';
+    const risk = g.noiseRisk(i);
+    const tag = risk > 1.2 ? '<span class="tag red">Vaza muito som</span>' : risk > 0.5 ? '<span class="tag">Vaza um pouco</span>' : '<span class="tag green">Silenciosa</span>';
+    let d = `<div class="sect">🧱 Paredes: <b>${WALL_NAMES[p.walls]}</b> ${tag}</div>`;
+    d += `<div class="small muted">Som de bateria e bandas atravessa paredes simples: alunos da sala vizinha reclamam e a aula rende menos.</div>`;
+    if (p.walls < 2) {
+      const sk = WALL_SKILL[p.walls + 1];
+      const locked = sk && !g.has(sk);
+      d += `<button class="btn ${locked ? 'ghost' : ''} wide" data-act="walls" data-arg="${i}" ${locked ? 'disabled' : ''}>🧱 Trocar por "${WALL_NAMES[p.walls + 1]}" — ${money(WALL_COST[p.walls + 1] + p.w * 40)}${locked ? '<small>requer Tratamento Acústico</small>' : ''}</button>`;
+    }
+    return d;
   };
   const itemsBlock = () => {
     const list = (Object.keys(ROOM_ITEMS) as ItemId[]).filter((k) => ROOM_ITEMS[k].types.includes(p.type));
@@ -111,7 +114,7 @@ export function roomPanel(g: Game, i: number): string {
     }
     return h;
   }
-  if (p.type === 'rehearsal') {
+  if (p.type === 'rehearsal' || p.type === 'booth') {
     h += `<p>Bandas alugam à noite (17h–20h) e aos sábados. Equipamento e ambiente melhores = mais reservas.</p>
       <div class="kv"><span>Preço por hora</span><b>${money(s.prices.rehearsal)}</b></div>
       <input type="range" min="20" max="160" step="10" value="${s.prices.rehearsal}" data-input="price-rehearsal" class="wide">

@@ -1,6 +1,6 @@
 import './style.css';
 import { Scene, SceneModel } from './game/scene';
-import { makeLayout, setWorldWidth } from './game/layout';
+import { makeLayout } from './game/layout';
 import { Game, BOSS_LOOK } from './game/game';
 import { UI } from './ui/ui';
 import { newGame, loadGame, saveGame, GameState } from './game/state';
@@ -21,23 +21,25 @@ resize();
 
 // ------------------------------------------------------------------ demo backdrop (title screen)
 const ALL = ['cadeiras', 'som', 'clima', 'luz', 'estante', 'plantas', 'sofa', 'tv'];
+// an organically grown school for the title screen
+const DEMO: { side: 'top' | 'bottom'; col: number; w: number; h: number; type: any; decor: number; equip?: any; items: string[]; walls: number }[] = [
+  { side: 'bottom', col: 30, w: 8, h: 7, type: 'reception', decor: 4, items: ALL, walls: 1 },
+  { side: 'bottom', col: 38, w: 9, h: 7, type: 'classroom', decor: 2, equip: { violao: 1, guitarra: 1, ukulele: 0 }, items: ['cadeiras', 'som', 'plantas'], walls: 1 },
+  { side: 'bottom', col: 47, w: 5, h: 7, type: 'booth', decor: 3, items: ALL, walls: 2 },
+  { side: 'bottom', col: 52, w: 10, h: 7, type: 'classroom', decor: 4, equip: { piano: 2, violino: 1, canto: 2 }, items: ALL, walls: 2 },
+  { side: 'bottom', col: 20, w: 8, h: 7, type: 'lounge', decor: 2, items: ALL, walls: 0 },
+  { side: 'top', col: 22, w: 14, h: 10, type: 'auditorium', decor: 3, items: ALL, walls: 1 },
+  { side: 'top', col: 38, w: 10, h: 8, type: 'rehearsal', decor: 3, items: ALL, walls: 2 },
+  { side: 'top', col: 48, w: 9, h: 7, type: 'classroom', decor: 3, equip: { bateria: 2, baixo: 1, guitarra: 2 }, items: ALL, walls: 2 },
+  { side: 'top', col: 57, w: 6, h: 7, type: 'studio', decor: 1, items: ['som'], walls: 0 },
+];
 function demoModel(): SceneModel {
-  const layout = makeLayout(4);
-  const plots = [
-    { index: 0, owned: true, type: 'classroom' as const, decor: 4, equip: { piano: 2, violino: 1, canto: 2 }, items: ALL },
-    { index: 1, owned: true, type: 'rehearsal' as const, decor: 3, equip: {}, items: ALL },
-    { index: 2, owned: true, type: 'classroom' as const, decor: 3, equip: { guitarra: 1, baixo: 1, bateria: 1 }, items: ALL },
-    { index: 3, owned: true, type: 'lounge' as const, decor: 2, equip: {}, items: ALL },
-    { index: 4, owned: true, type: 'reception' as const, decor: 4, equip: {}, items: ALL },
-    { index: 5, owned: true, type: 'classroom' as const, decor: 1, equip: { violao: 1, ukulele: 0 }, items: ['cadeiras', 'plantas', 'som'] },
-    { index: 6, owned: true, type: 'auditorium' as const, decor: 2, equip: {}, items: ALL },
-    { index: 7, owned: true, type: 'studio' as const, decor: 3, equip: {}, items: ALL },
-  ];
+  const layout = makeLayout(DEMO.map((d, i) => ({ id: i, side: d.side, col: d.col, w: d.w, h: d.h })), 0);
+  const plots = DEMO.map((d, i) => ({ index: i, owned: true, type: d.type, decor: d.decor, equip: d.equip ?? {}, items: d.items, walls: d.walls }));
   return { layout, plots, sign: 'ESCOLA DE MÚSICA', signColor: '#c24d6a', version: -1 };
 }
 
 function demoAgents() {
-  setWorldWidth(640);
   const m = demoModel();
   scene.setModel(m, false);
   scene.agents = [];
@@ -123,6 +125,8 @@ window.addEventListener('pointerup', (e) => {
   down = null;
   if (wasDrag || !game || e.target !== canvas) return;
   const pt = scene.toWorld(e.clientX, e.clientY);
+  const gh = scene.ghostAt(pt);
+  if (gh >= 0) { ui?.confirmSpot(gh); return; }
   const r = game.click(pt);
   if (r && r.kind === 'plot' && game.s.chapter >= 2) ui?.openPanel('room', r.plot);
 });

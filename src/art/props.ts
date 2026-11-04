@@ -534,7 +534,7 @@ export function guitarWall(color: string) {
   }));
 }
 
-export function bubble(kind: 'q' | 'note' | 'excl' | 'zz' | 'heart' | 'coin' | 'sad') {
+export function bubble(kind: 'q' | 'note' | 'excl' | 'zz' | 'heart' | 'coin' | 'sad' | 'noise') {
   return cached('bubble' + kind, () => sprite(11, 11, (p) => {
     p.rect(1, 0, 9, 8, '#fffaf0'); p.rect(0, 1, 11, 6, '#fffaf0');
     p.rect(4, 8, 3, 1, '#fffaf0'); p.px(5, 9, '#fffaf0');
@@ -545,6 +545,7 @@ export function bubble(kind: 'q' | 'note' | 'excl' | 'zz' | 'heart' | 'coin' | '
     if (kind === 'zz') { p.hl(3, 2, 4, c); p.px(5, 3, c); p.px(4, 4, c); p.hl(3, 5, 4, c); }
     if (kind === 'heart') { p.rect(3, 2, 2, 1, c); p.rect(6, 2, 2, 1, c); p.rect(2, 3, 7, 2, c); p.rect(3, 5, 5, 1, c); p.px(5, 6, c); }
     if (kind === 'coin') { p.circle(5, 4, 3, c); p.circle(5, 4, 2, '#f2d06a'); p.vl(5, 3, 3, c); }
+    if (kind === 'noise') { const r = '#e05a4a'; p.rect(2, 3, 2, 3, '#4a4652'); p.rect(4, 2, 1, 5, '#4a4652'); p.px(6, 2, r); p.px(7, 3, r); p.px(7, 4, r); p.px(7, 5, r); p.px(6, 6, r); p.vl(9, 2, 5, r); }
     if (kind === 'sad') { p.px(3, 3, c); p.px(7, 3, c); p.hl(4, 6, 3, c); p.px(3, 7, c); p.px(7, 7, c); }
   }));
 }

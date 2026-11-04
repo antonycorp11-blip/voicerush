@@ -215,7 +215,7 @@ export const EVENT_DEFS: Record<string, EventDef> = {
   },
   vizinho: {
     id: 'vizinho', category: 'mercado', emoji: '🔊', ignore: 2, weight: 2,
-    when: (g) => (!g.has('acustica') && g.s.plots.some((p) => p.owned && (p.equip.bateria !== undefined || p.type === 'rehearsal')) ? {} : null),
+    when: (g) => (!g.has('acustica') && g.s.plots.some((p) => p.owned && (p.equip.bateria !== undefined || p.type === 'rehearsal' || p.type === 'booth')) ? {} : null),
     title: () => 'Vizinho reclamou do barulho!',
     text: () => 'O vizinho do lado ameaça chamar a fiscalização por causa da bateria. (Tratamento Acústico na árvore resolve isso de vez.)',
     options: [
@@ -281,9 +281,9 @@ export const EVENT_DEFS: Record<string, EventDef> = {
     id: 'aluguel', category: 'mercado', emoji: '🏢', ignore: 1, urgent: true, weight: 4,
     when: (g) => (g.s.chapter === 3 && g.s.building === 1 && (g.s.investor?.week ?? 0) >= 6 && !g.s.flags.rentEvent ? ((g.s.flags.rentEvent = 1), {}) : null),
     title: () => 'O dono do prédio quer reajustar o aluguel!',
-    text: () => 'O proprietário avisou: o aluguel vai subir 70% no mês que vem. Um corretor ofereceu um prédio novo, maior (10 espaços) e moderno, com aluguel 10% mais barato por sala. A mudança é feita por uma empresa: todas as salas, instrumentos e móveis são remontados do mesmo jeito lá.',
+    text: () => 'O proprietário avisou: o aluguel vai subir 70% no mês que vem. Um corretor ofereceu um prédio novo e moderno, num terreno muito maior (dá para crescer o dobro e fazer salas mais altas), com aluguel 10% mais barato. A mudança é feita por uma empresa: todas as salas, instrumentos e móveis são remontados do mesmo jeito lá.',
     options: [
-      { label: '🚚 Mudar para o prédio novo (R$ 6.000)', hint: 'Prédio maior, fachada moderna, mais espaço para crescer.', apply: (g) => {
+      { label: '🚚 Mudar para o prédio novo (R$ 6.000)', hint: 'Terreno maior, fachada moderna, muito mais espaço para crescer.', apply: (g) => {
         if (!g.spend(6000, 'Mudança de prédio')) { g.s.flags.rentMult = 1.7; return 'Sem dinheiro para a mudança… o aluguel subiu 70%.'; }
         g.moveBuilding(); return 'Bem-vindo ao prédio novo! 🎉';
       } },

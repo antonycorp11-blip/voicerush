@@ -4,7 +4,8 @@ import { randomLook } from '../art/characters';
 import type { InstrumentId, MinigameKind } from '../data/instruments';
 import { INSTRUMENTS, INSTRUMENT_IDS } from '../data/instruments';
 import {
-  CAMPAIGNS, CampaignId, DECOR_COST, DECOR_SKILL, MAX_DECOR, ROOM_ITEMS, ItemId, PLOT_DEPOSIT, PLOT_RENT, ROOM_TYPES, RoomType, SKILL_MAP,
+  CAMPAIGNS, CampaignId, DECOR_COST, DECOR_SKILL, MAX_DECOR, ROOM_ITEMS, ItemId, ROOM_TYPES, RoomType, SKILL_MAP,
+  LAND, BUILD_PER_CELL, RENT_PER_CELL, WALL_COST, WALL_NAMES, WALL_SKILL,
   STAFF_ROLES, StaffRole, TRAITS, TraitId, RIVAL_FOCUS,
 } from '../data/content';
 import {
@@ -12,7 +13,7 @@ import {
   randomName, firstName, playerTeacher, saveGame, DAY_NAMES, Ch1Task, WeekStats,
 } from './state';
 import { Scene, SceneModel, Agent, PlotView } from './scene';
-import { setWorldWidth, plotRow, plotCol } from './layout';
+import { wallNeighbors } from './layout';
 import { Layout, makeLayout, pathTo, pathBetween, pathToStreet, plotCx, plotFloor, SIDEWALK_Y, WORLD_W, Pt } from './layout';
 import { sfx } from '../audio';
 import { EVENT_DEFS, rollEvent } from './events';
@@ -20,6 +21,8 @@ import { EVENT_DEFS, rollEvent } from './events';
 export const BASE_PRICE = { ind: 280, grp: 160 };
 export const MIN_PER_SEC = 7.5; // game minutes per real second at 1x
 export const HOUR_ORDER = [17, 18, 16, 19, 15, 14, 10, 9, 11, 8, 13, 12];
+
+export interface BuildSpot { side: 'top' | 'bottom'; col: number; w: number; h: number; label: string; cost: number; between: boolean }
 
 export interface Lead {
   id: number;
@@ -47,6 +50,8 @@ export interface Lesson {
   agents: Agent[];
   teacherAgent: Agent | null;
   hour: number;
+  noise?: number;
+  noiseFrom?: number | null;
 }
 
 export interface DialogLine { who: string; text: string; look?: Look; side?: 'l' | 'r' }
@@ -67,6 +72,13 @@ export interface UIHooks {
 export const BOSS_LOOK: Look = { skin: '#dca277', hair: '#9a96a0', hairStyle: 5, shirt: '#55606e', pants: '#2f3440', shoes: '#3a2a24', extra: 'beard', accent: '#55606e' };
 export const INVESTOR_LOOK: Look = { skin: '#efbf98', hair: '#2e2420', hairStyle: 0, shirt: '#2f3440', pants: '#2f3440', shoes: '#2a2a33', extra: 'glasses', accent: '#c24d6a' };
 export const LANDLORD_LOOK: Look = { skin: '#b97d52', hair: '#4b3226', hairStyle: 5, shirt: '#58b06c', pants: '#6b5a48', shoes: '#3a2a24', extra: 'cap', accent: '#f2c14e' };
+
+export const CH1_ROOMS = [
+  { id: 0, side: 'top' as const, col: 32, w: 8, h: 7 },
+  { id: 1, side: 'top' as const, col: 40, w: 8, h: 7 },
+  { id: 2, side: 'bottom' as const, col: 32, w: 8, h: 7 },
+  { id: 3, side: 'bottom' as const, col: 40, w: 8, h: 7 },
+];
 
 export class Game {
   s: GameState;
@@ -91,8 +103,9 @@ export class Game {
   constructor(s: GameState, scene: Scene) {
     this.s = s;
     this.scene = scene;
-    setWorldWidth(s.building === 2 && s.chapter > 1 ? 768 : 640);
-    this.layout = makeLayout(s.chapter === 1 ? 2 : s.building === 2 ? 5 : 4);
+    this.layout = makeLayout([], 0);
+    if (s.chapter === 1) this.layout = makeLayout(CH1_ROOMS, 2);
+    else this.relayout();
   }
 
   // ------------------------------------------------------------------ helpers
@@ -152,10 +165,10 @@ export class Game {
     let signColor = '#c24d6a';
     if (s.chapter === 1) {
       plots = [
-        { index: 0, owned: true, type: 'office', decor: 2, equip: {}, items: ['luz', 'clima'] },
-        { index: 1, owned: true, type: 'classroom', decor: 2, equip: { violao: 1, piano: 1, guitarra: 1 }, items: ['som', 'plantas', 'estante', 'luz'] },
-        { index: 2, owned: true, type: 'reception', decor: 2, equip: {}, items: ['sofa', 'plantas', 'tv', 'clima'] },
-        { index: 3, owned: true, type: 'classroom', decor: 2, equip: { canto: 1, bateria: 1, ukulele: 1 }, items: ['som', 'cadeiras', 'clima', 'luz'] },
+        { index: 0, owned: true, type: 'office', decor: 2, equip: {}, items: ['luz', 'clima'], walls: 1 },
+        { index: 1, owned: true, type: 'classroom', decor: 2, equip: { violao: 1, piano: 1, guitarra: 1 }, items: ['som', 'plantas', 'estante', 'luz'], walls: 1 },
+        { index: 2, owned: true, type: 'reception', decor: 2, equip: {}, items: ['sofa', 'plantas', 'tv', 'clima'], walls: 1 },
+        { index: 3, owned: true, type: 'classroom', decor: 2, equip: { canto: 1, bateria: 1, ukulele: 1 }, items: ['som', 'cadeiras', 'clima', 'luz'], walls: 1 },
       ];
       sign = 'ESTÚDIO SOM MAIOR';
       signColor = '#3f74c9';
@@ -167,8 +180,8 @@ export class Game {
         decor: p.decor,
         equip: p.equip,
         items: p.items,
+        walls: p.walls,
         shared: !p.owned && p.index === this.layout.hall,
-        rentable: !p.owned && this.canRentPlot(p.index),
       }));
       if (s.chapter === 2) { sign = 'AULAS - SALA 2'; signColor = '#d08a2a'; }
       else sign = s.plots[this.layout.hall].type === 'reception' ? 'ESCOLA DE MÚSICA' : 'ESCOLA - EM OBRAS';
@@ -697,6 +710,8 @@ export class Game {
     if (s.chapter >= 2) this.spawnLeads();
     // rehearsal bookings & studio
     this.roomBusiness(hour);
+    // sound leaking through walls (computed once everything for this hour started)
+    for (const l of ls) { const n = this.noiseAt(l.plot); l.noise = n.level; l.noiseFrom = n.from; }
     // recital
     if (s.recital && s.recital.week === s.week && s.day === 5 && hour === 15) this.runRecital();
     this.dirtyUI = true;
@@ -745,7 +760,21 @@ export class Game {
       const t = this.teacher(l.teacherId);
       const plot = s.plots[l.plot];
       const group = l.students.length > 1 || !!l.contract || l.students[0]?.kind === 'grp';
-      const q = this.lessonQuality(t, plot, l.inst, group, { score: l.score, player: l.player, sub: l.sub });
+      let q = this.lessonQuality(t, plot, l.inst, group, { score: l.score, player: l.player, sub: l.sub });
+      const noise = l.noise ?? 0;
+      if (noise > 0.5) {
+        q = Math.max(5, q - noise * 7);
+        s.stats.noise = (s.stats.noise ?? 0) + 1;
+        const key = `noise${l.plot}_${s.dayIndex}`;
+        if (noise > 0.9 && !s.flags[key] && Math.random() < 0.6) {
+          s.flags[key] = 1;
+          const src = l.noiseFrom != null ? s.plots[l.noiseFrom] : null;
+          const what = src ? (src.type === 'classroom' ? 'a aula da sala ao lado' : 'a banda ao lado') : 'a sala ao lado';
+          if (l.agents[0]) l.agents[0].bubble = 'noise';
+          this.ui.toast(`🔊 ${l.students[0] ? firstName(l.students[0].name) : 'Um aluno'} reclamou: "dá pra ouvir ${what}!" — melhore as paredes da ${this.roomLabel(plot)}.`, 'bad');
+          this.news(`🔊 Reclamação de barulho na ${this.roomLabel(plot)}.`, 'bad');
+        }
+      }
       s.stats.lessons++;
       s.stats.quality += q;
       let revenue = 0;
@@ -755,6 +784,7 @@ export class Game {
         if (t?.traits.includes('carismatico') && !l.sub) d += 1.5;
         if (l.player && l.score != null && l.score >= 85) d += 3;
         if (plot) for (const it of ['cadeiras', 'clima', 'plantas']) if (plot.items.includes(it)) d += 0.4;
+        if (noise > 0.5) d -= noise * 1.6;
         st.sat = Math.max(0, Math.min(100, st.sat + d));
         if (!st.unpaid) revenue += st.fee / 4;
         if (this.hasRoom('lounge') && Math.random() < 0.35) revenue += 8;
@@ -773,7 +803,7 @@ export class Game {
       // leave
       for (const a of l.agents) {
         a.held = null;
-        a.bubble = q >= 78 ? 'heart' : q < 40 ? 'sad' : null;
+        a.bubble = a.bubble === 'noise' ? 'noise' : q >= 78 ? 'heart' : q < 40 ? 'sad' : null;
         a.clickable = false;
         a.onClick = null;
         this.scene.walk(a, pathToStreet(this.layout, l.plot, a), () => this.scene.removeAgent(a));
@@ -806,14 +836,15 @@ export class Game {
     const s = this.s;
     for (const p of s.plots) {
       if (!p.owned) continue;
-      if (p.type === 'rehearsal') {
+      if (p.type === 'rehearsal' || p.type === 'booth') {
+        const small = p.type === 'booth';
         const ok = (s.day < 5 && hour >= 17) || (s.day === 5 && hour >= 9);
         if (!ok) continue;
         const prob = Math.min(0.94, (0.3 + p.decor * 0.1 + p.items.length * 0.05) * Math.pow(50 / Math.max(10, s.prices.rehearsal), 1.2));
         if (Math.random() < prob) {
-          const price = s.prices.rehearsal;
+          const price = Math.round(s.prices.rehearsal * (small ? 0.7 : 1.25));
           const sp = this.scene.roomSpots(p.index);
-          const n = 3 + Math.floor(Math.random() * 2);
+          const n = small ? 2 + Math.floor(Math.random() * 2) : 3 + Math.floor(Math.random() * 2);
           for (let k = 0; k < n; k++) {
             const target = sp?.band[k] ?? { x: plotCx(this.layout, p.index), y: plotFloor(this.layout, p.index).y + 40 };
             const a = this.scene.spawn(randomLook(), -12, SIDEWALK_Y, { tag: 'band', speed: 60 });
@@ -830,7 +861,7 @@ export class Game {
           this.addCash(price, 'Sala de ensaio', plotCx(this.layout, p.index), f.y + 20);
         }
       }
-      if (p.type === 'studio' && s.day < 6 && hour >= 10 && hour <= 19 && Math.random() < 0.18 + p.decor * 0.04) {
+      if (p.type === 'studio' && s.day < 6 && hour >= 10 && hour <= 19 && Math.random() < (0.18 + p.decor * 0.04) * Math.max(0.2, 1 - this.noiseRisk(p.index) * 0.35)) {
         const f = plotFloor(this.layout, p.index);
         this.scene.setActive(p.index, [], 50 / MIN_PER_SEC / Math.max(1, this.speed));
         this.addCash(140, 'Estúdio', plotCx(this.layout, p.index), f.y + 20);
@@ -1011,7 +1042,7 @@ export class Game {
   weeklyFixedCosts() {
     const s = this.s;
     let rent = 0;
-    for (const p of s.plots) if (p.owned) rent += s.chapter === 2 ? 200 : p.index === this.layout.hall ? 80 : PLOT_RENT;
+    for (const p of s.plots) if (p.owned) rent += s.chapter === 2 ? 200 : p.w * RENT_PER_CELL * (p.side === 'top' ? 0.9 : 1);
     rent *= s.flags.rentMult ?? 1;
     if (s.building === 2) rent *= 0.9;
     if (this.has('planilha')) rent *= 0.92;
@@ -1213,37 +1244,156 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ actions
-  /** Expansion is directional: only spaces next to (or right above) one you own. */
-  canRentPlot(i: number) {
+  // ---------------------------------------------------------------- building (prefab rooms on a growing corridor)
+  land() { return LAND[this.s.building]; }
+
+  /** Rebuild the geometry from the room list (call after building / growing rooms). */
+  relayout() {
     const s = this.s;
-    if (s.chapter < 3) return false;
+    const hall = s.plots.find((p) => p.type === 'hall' || p.type === 'reception')?.index ?? 0;
+    this.layout = makeLayout(s.plots.map((p) => ({ id: p.index, side: p.side, col: p.col, w: p.w, h: p.h })), hall);
+  }
+
+  /** Free spots (prefab positions) where a room of this type fits, next to the existing school. */
+  buildSpots(type: RoomType): BuildSpot[] {
+    const s = this.s;
+    const def = ROOM_TYPES[type];
+    if (!def) return [];
+    const land = this.land();
     const L = this.layout;
-    if (i === L.hall || s.plots[i]?.owned) return false;
-    if (i < L.cols) {
-      const half = Math.ceil(L.cols / 2);
-      if (i < half ? !this.has('expansao1') : !this.has('expansao2')) return false;
+    const out: BuildSpot[] = [];
+    const sides: ('top' | 'bottom')[] = def.topOnly ? ['top'] : ['top', 'bottom'];
+    for (const side of sides) {
+      if (side === 'top' && !this.has('expansao1') && s.chapter === 3 && s.plots.every((p) => p.side !== 'top')) {
+        // back side starts locked until "Novos Espaços"
+        continue;
+      }
+      if (side === 'top' && def.h > land.maxH) continue;
+      const occ = s.plots.filter((p) => p.side === side).map((p) => [p.col, p.col + p.w] as [number, number]).sort((a, b) => a[0] - b[0]);
+      const cand = new Set<number>();
+      // next to every room on this side, and along the corridor
+      for (const [a, b] of occ) { cand.add(b); cand.add(a - def.w); }
+      cand.add(L.minCol); cand.add(L.maxCol - def.w); cand.add(L.maxCol); cand.add(L.minCol - def.w);
+      for (const col of cand) {
+        if (col < land.min || col + def.w > land.max) continue;
+        if (occ.some(([a, b]) => col < b && col + def.w > a)) continue;
+        if (col > L.maxCol || col + def.w < L.minCol) continue; // must touch the corridor
+        const left = s.plots.find((p) => p.side === side && p.col + p.w === col);
+        const right = s.plots.find((p) => p.side === side && p.col === col + def.w);
+        let label: string;
+        const mid = (L.minCol + L.maxCol) / 2;
+        if (left && right) label = `↔️ Entre ${this.roomLabel(left)} e ${this.roomLabel(right)}`;
+        else if (left) label = `➡️ Ao lado de ${this.roomLabel(left)}`;
+        else if (right) label = `⬅️ Ao lado de ${this.roomLabel(right)}`;
+        else if (col + def.w <= L.minCol) label = '⬅️ Aumentando o corredor p/ esquerda';
+        else if (col >= L.maxCol) label = '➡️ Aumentando o corredor p/ direita';
+        else label = col + def.w / 2 < mid ? '⬅️ Ala esquerda' : '➡️ Ala direita';
+        label += side === 'top' ? ' (fundos)' : ' (frente)';
+        if (out.some((o) => o.label === label)) continue;
+        const extends_ = col < L.minCol || col + def.w > L.maxCol;
+        const cost = def.cost + def.w * BUILD_PER_CELL + (extends_ ? 800 : 0);
+        out.push({ side, col, w: def.w, h: side === 'top' ? def.h : 7, label, cost, between: !!(left && right) });
+      }
     }
-    return this.neighbors(i).some((n) => s.plots[n]?.owned);
+    return out.sort((a, b) => Number(b.between) - Number(a.between) || a.cost - b.cost);
   }
 
-  neighbors(i: number) {
-    const L = this.layout;
-    const r = plotRow(L, i), c = plotCol(L, i);
-    const out: number[] = [];
-    if (c > 0) out.push(i - 1);
-    if (c < L.cols - 1) out.push(i + 1);
-    out.push(r === 0 ? i + L.cols : i - L.cols);
-    return out;
+  roomLabel(p: Plot) {
+    if (p.type === 'hall' || p.type === 'reception') return 'Recepção';
+    const same = this.s.plots.filter((x) => x.type === p.type);
+    const n = same.length > 1 ? ' ' + (same.indexOf(p) + 1) : '';
+    return (ROOM_TYPES[p.type]?.name ?? 'sala') + n;
   }
 
-  /** Human label for an expansion direction. */
-  expandLabel(i: number) {
-    const L = this.layout;
+  buildAt(type: RoomType, spot: BuildSpot) {
     const s = this.s;
-    const n = this.neighbors(i).find((k) => s.plots[k]?.owned);
-    if (n === undefined) return 'Expandir';
-    if (plotRow(L, n) !== plotRow(L, i)) return plotRow(L, i) === 0 ? '⬆️ Subir para o andar de cima' : '⬇️ Descer para o térreo';
-    return plotCol(L, i) > plotCol(L, n) ? `➡️ Expandir para a direita${plotRow(L, i) === 0 ? ' (andar de cima)' : ' (térreo)'}` : `⬅️ Expandir para a esquerda${plotRow(L, i) === 0 ? ' (andar de cima)' : ' (térreo)'}`;
+    const def = ROOM_TYPES[type];
+    if (!def) return;
+    if (def.skill && !this.has(def.skill)) return;
+    if (!this.buildSpots(type).some((x) => x.side === spot.side && x.col === spot.col)) return;
+    if (!this.spend(spot.cost, 'Obras e expansão')) return;
+    const id = s.plots.length;
+    s.plots.push({ index: id, owned: true, type, decor: 1, equip: {}, items: [], side: spot.side, col: spot.col, w: spot.w, h: spot.h, walls: 0 });
+    this.relayout();
+    sfx.build();
+    this.invalidateScene();
+    const f = plotFloor(this.layout, id);
+    this.scene.sparkle(plotCx(this.layout, id), f.y + 30, 24);
+    this.scene.focusBuilding(this.layout);
+    this.ui.toast(`🏗️ ${def.name} construída — ${spot.label.replace(/^\S+ /, '')}!`, 'good');
+    this.addXP(15);
+    this.placeStaff();
+    return id;
+  }
+
+  /** Grow a room sideways by n cells if there is free space next to it. */
+  growRoom(i: number, n = 1): boolean {
+    const s = this.s;
+    const p = s.plots[i];
+    const land = this.land();
+    const free = (col: number, w: number) => col >= land.min && col + w <= land.max && !s.plots.some((o) => o !== p && o.side === p.side && col < o.col + o.w && col + w > o.col);
+    if (free(p.col + p.w, n)) { p.w += n; }
+    else if (free(p.col - n, n)) { p.col -= n; p.w += n; }
+    else if (p.side === 'top' && p.h < land.maxH) { p.h += 1; } // no room beside it: grows deeper
+    else return false;
+    this.relayout();
+    return true;
+  }
+
+  upgradeWalls(i: number) {
+    const p = this.s.plots[i];
+    const next = p.walls + 1;
+    if (next > 2) return;
+    const sk = WALL_SKILL[next];
+    if (sk && !this.has(sk)) { this.ui.toast('Isolamento profissional requer Tratamento Acústico.', 'bad'); return; }
+    if (!this.spend(WALL_COST[next] + p.w * 40, 'Obras e expansão')) return;
+    p.walls = next;
+    sfx.build();
+    this.ui.toast(`🧱 ${WALL_NAMES[next]} instalado. Menos som vazando!`, 'good');
+    this.invalidateScene();
+  }
+
+  /** How loud a room is at a given moment (0 when idle). */
+  roomLoudness(i: number): number {
+    const p = this.s.plots[i];
+    if (!p) return 0;
+    const active = this.scene.activeRooms.get(i);
+    if (!active) return 0;
+    if (p.type === 'classroom') {
+      const map: Partial<Record<InstrumentId, number>> = { bateria: 2.6, guitarra: 1.5, baixo: 1.4, canto: 1, piano: 0.9, violino: 0.8, violao: 0.6, ukulele: 0.5 };
+      return Math.max(0.4, ...active.inst.map((x) => map[x] ?? 0.6));
+    }
+    return ROOM_TYPES[p.type]?.loud ?? 0;
+  }
+
+  /** Sound leaking into room i from its wall neighbours right now. */
+  noiseAt(i: number): { level: number; from: number | null } {
+    const s = this.s;
+    let level = 0, from: number | null = null, worst = 0;
+    for (const n of wallNeighbors(this.layout, i)) {
+      const loud = this.roomLoudness(n);
+      if (!loud) continue;
+      const w = Math.max(s.plots[i].walls, s.plots[n].walls);
+      const both = Math.min(s.plots[i].walls, s.plots[n].walls) > 0 ? 0.7 : 1;
+      const v = loud * [1, 0.4, 0.1][w] * both;
+      level += v;
+      if (v > worst) { worst = v; from = n; }
+    }
+    return { level, from };
+  }
+
+  /** Worst-case leak estimate for the room panel. */
+  noiseRisk(i: number): number {
+    const s = this.s;
+    let lvl = 0;
+    for (const n of wallNeighbors(this.layout, i)) {
+      const p = s.plots[n];
+      let loud = ROOM_TYPES[p.type]?.loud ?? 0;
+      if (p.type === 'classroom') loud = p.equip.bateria !== undefined ? 2.6 : p.equip.guitarra !== undefined || p.equip.baixo !== undefined ? 1.5 : 0.8;
+      const w = Math.max(s.plots[i].walls, p.walls);
+      lvl += loud * [1, 0.4, 0.1][w] * (Math.min(s.plots[i].walls, p.walls) > 0 ? 0.7 : 1);
+    }
+    return lvl;
   }
 
   buyItem(i: number, id: ItemId) {
@@ -1254,65 +1404,26 @@ export class Game {
     if (!this.spend(cost, 'Móveis e equipamentos')) return;
     p.items.push(id);
     sfx.build();
+    this.invalidateScene();
     const f = plotFloor(this.layout, i);
     this.scene.sparkle(plotCx(this.layout, i), f.y + 30, 14);
     this.ui.toast(`${def.emoji} ${def.name} instalado(a) no lugar certo!`, 'good');
     this.addXP(4);
-    this.invalidateScene();
     this.placeStaff();
   }
 
-  /** Move everything to a bigger, modern building (pre-built layout). */
+  /** Move to a bigger building: same prefab rooms, much more land around them. */
   moveBuilding() {
     const s = this.s;
     if (s.building === 2) return;
-    const oldCols = 4, newCols = 5;
-    const map = (i: number) => (i < oldCols ? i : i - oldCols + newCols);
-    const plots: Plot[] = [];
-    for (let i = 0; i < newCols * 2; i++) plots.push({ index: i, owned: false, type: 'empty', decor: 0, equip: {}, items: [] });
-    for (const p of s.plots) { const ni = map(p.index); plots[ni] = { ...p, index: ni }; }
-    for (const st of s.students) st.plot = map(st.plot);
-    for (const c of s.contracts) c.plot = map(c.plot);
-    s.plots = plots;
     s.building = 2;
     s.flags.rentMult = 1;
-    setWorldWidth(768);
-    this.layout = makeLayout(newCols);
-    this.scene.zoom = 0;
-    this.scene.panX = this.scene.panY = 0;
+    this.relayout();
     this.invalidateScene();
     this.setupWorldAgents();
-    this.ui.toast('🚚 Mudança concluída! Todas as salas foram remontadas no prédio novo.', 'good');
+    this.scene.focusBuilding(this.layout);
+    this.ui.toast('🚚 Mudança concluída! Mesmas salas, remontadas num terreno bem maior.', 'good');
     this.addXP(50);
-  }
-
-  rentPlot(i: number) {
-    const p = this.s.plots[i];
-    if (p.owned || !this.canRentPlot(i)) return;
-    if (!this.spend(PLOT_DEPOSIT, 'Obras e expansão')) return;
-    p.owned = true;
-    p.type = 'empty';
-    sfx.build();
-    this.ui.toast('🔑 Espaço novo! Agora escolha o que construir.', 'good');
-    this.invalidateScene();
-    this.placeStaff();
-  }
-
-  buildRoom(i: number, type: RoomType) {
-    const p = this.s.plots[i];
-    const def = ROOM_TYPES[type];
-    if (!p.owned || !def) return;
-    if (def.skill && !this.has(def.skill)) return;
-    if (!this.spend(def.cost, 'Obras e expansão')) return;
-    p.type = type;
-    p.decor = Math.max(p.decor, 1);
-    sfx.build();
-    const f = plotFloor(this.layout, i);
-    this.scene.sparkle(plotCx(this.layout, i), f.y + 30, 24);
-    this.ui.toast(`🏗️ ${def.name} construída!`, 'good');
-    this.addXP(15);
-    this.invalidateScene();
-    this.placeStaff();
   }
 
   buildReception() {
@@ -1322,12 +1433,14 @@ export class Game {
     p.items = p.items ?? [];
     p.type = 'reception';
     p.decor = Math.max(1, p.decor);
+    p.owned = true;
+    this.growRoom(p.index, 2);
     sfx.build();
+    this.invalidateScene();
     const f = plotFloor(this.layout, p.index);
     this.scene.sparkle(plotCx(this.layout, p.index), f.y + 30, 24);
     this.ui.toast('🛎️ Recepção pronta! Agora os interessados esperam aqui.', 'good');
     this.addXP(20);
-    this.invalidateScene();
     this.placeStaff();
   }
 
@@ -1339,10 +1452,15 @@ export class Game {
     if (sk && !this.has(sk)) { this.ui.toast('Precisa desbloquear na árvore de habilidades.', 'bad'); return; }
     if (!this.spend(DECOR_COST[next], 'Obras e expansão')) return;
     p.decor = next;
+    // rooms get bigger as they level up (if there is free space beside them)
+    let grew = false;
+    const maxW = (ROOM_TYPES[p.type]?.w ?? p.w) + (this.has('expansao2') ? 3 : 2);
+    if (next >= 2 && p.w < maxW && p.type !== 'hall') grew = this.growRoom(i, 1);
     sfx.build();
+    this.invalidateScene();
     const f = plotFloor(this.layout, i);
     this.scene.sparkle(plotCx(this.layout, i), f.y + 30, 30);
-    this.ui.toast('✨ Ambiente renovado! Aulas melhores e alunos mais felizes.', 'good');
+    this.ui.toast(grew ? '✨ Sala reformada e AMPLIADA! Tudo subiu de nível junto.' : p.w < maxW && next >= 2 ? '✨ Sala reformada! (sem espaço livre ao lado para ampliar)' : '✨ Sala reformada! Móveis e equipamentos subiram de nível junto.', 'good');
     this.addXP(10);
     this.invalidateScene();
     this.placeStaff();
@@ -1710,13 +1828,13 @@ export class Game {
     const s = this.s;
     s.chapter = 2;
     s.cash = Math.max(250, s.cash - 600);
-    this.layout = makeLayout(4);
-    const room = s.plots[5];
-    room.owned = true;
-    room.type = 'classroom';
-    room.decor = 0;
-    for (const i of s.playerInstruments) room.equip[i] = 0;
-    s.plots[4].type = 'hall';
+    // the building's shared entrance + the little rented room next to it
+    s.plots = [
+      { index: 0, owned: false, type: 'hall', decor: 0, equip: {}, items: [], side: 'bottom', col: 36, w: 6, h: 7, walls: 0 },
+      { index: 1, owned: true, type: 'classroom', decor: 0, equip: {}, items: [], side: 'bottom', col: 42, w: 7, h: 7, walls: 0 },
+    ];
+    for (const i of s.playerInstruments) s.plots[1].equip[i] = 0;
+    this.relayout();
     const me = playerTeacher(s);
     me.hours = 30;
     s.teachers = [me];
@@ -1764,9 +1882,10 @@ export class Game {
     await this.ui.choice('Proposta do investidor', 'Aceitar a sociedade com Augusto Ferraz?', [{ label: '🤝 Aceitar e abrir a escola!', sub: 'Capítulo 3: A Escola' }], INVESTOR_LOOK);
     s.chapter = 3;
     s.cash += 25000;
-    s.plots[4].owned = true;
-    s.plots[4].type = 'hall';
-    s.plots[4].decor = 0;
+    s.plots[0].owned = true;
+    s.plots[0].type = 'hall';
+    s.plots[0].decor = 0;
+    this.relayout();
     s.skillPoints += 2;
     s.investor = { trust: 60, week: 1, goalCash: 3000, goalProfit: 100, streak: 0, met: 0 };
     this.refreshCandidates();
