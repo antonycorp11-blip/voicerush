@@ -1,5 +1,6 @@
 // World geometry (tilted top-down, 3/4 view).
-export const WORLD_W = 640;
+export let WORLD_W = 640;
+export function setWorldWidth(w: number) { WORLD_W = w; }
 export const WORLD_H = 400;
 export const PLOT_W = 128;
 export const TOP_WALL_Y = 44; // top of back-wall face (top row)

@@ -566,3 +566,147 @@ export function shadowBlob(w: number) {
 }
 
 export { mix };
+
+// ============================================================ level-styled prefab items
+// Every room item has a look for each room level (0 abandonado .. 4 luxo).
+const GOLD = '#e8c25a';
+
+export function speakerL(level: number) {
+  return cached('spkL' + level, () => {
+    if (level <= 0) return sprite(8, 8, (p) => { p.box(0, 0, 8, 8, '#8a7a6a', 0.1); p.circle(4, 4, 2, '#5a4a40'); p.px(1, 1, '#a89a88'); });
+    if (level === 1) return sprite(9, 12, (p) => { p.box(0, 0, 9, 12, '#3a3644', 0.15); p.circle(4, 3, 1, '#6a6676'); p.circle(4, 8, 2, '#5a5666'); p.px(4, 8, '#9a96a6'); });
+    if (level === 2) return sprite(10, 22, (p) => {
+      p.box(0, 0, 10, 12, '#a8673a', 0.2); p.circle(5, 3, 1, '#3a3040'); p.circle(5, 8, 3, '#2e2a36'); p.circle(5, 8, 1, '#7a7686');
+      p.vl(5, 12, 8, '#4a4a58'); p.hl(2, 20, 7, '#4a4a58'); p.px(2, 21, '#4a4a58'); p.px(8, 21, '#4a4a58');
+    });
+    if (level === 3) return sprite(11, 24, (p) => {
+      p.box(0, 0, 11, 14, '#26232e', 0.12); p.circle(5, 4, 2, '#3a3644'); p.circle(5, 4, 1, GOLD); p.circle(5, 10, 3, '#3a3644'); p.circle(5, 10, 2, '#f2c14e'); p.circle(5, 10, 1, '#2e2a36');
+      p.vl(5, 14, 8, '#6a6a78'); p.hl(1, 22, 9, '#6a6a78'); p.px(9, 1, '#5ae07a');
+    });
+    return sprite(12, 32, (p) => {
+      p.box(0, 0, 12, 32, '#6e3a22', 0.18); p.rect(1, 1, 10, 30, '#7e4428');
+      p.vl(0, 0, 32, GOLD); p.vl(11, 0, 32, '#b08a3a');
+      for (const y of [6, 15, 24]) { p.circle(6, y, 3, '#2a2028'); p.circle(6, y, 2, '#4a3a40'); p.circle(6, y, 1, GOLD); }
+      p.hl(0, 31, 12, GOLD);
+    });
+  });
+}
+
+export function chairL(level: number, color = '#c47a4a') {
+  return cached('chairL' + level + color, () => {
+    if (level <= 0) return sprite(8, 10, (p) => { p.ellipse(4, 2, 3, 2, '#e8e4dc'); p.hl(1, 1, 6, '#ffffff'); p.vl(1, 3, 7, '#c8c2b8'); p.vl(6, 3, 7, '#c8c2b8'); });
+    if (level === 1) return chair('#b07a4a');
+    if (level === 2) return sprite(10, 14, (p) => {
+      p.box(1, 0, 8, 7, color, 0.25); p.rect(2, 1, 6, 5, shade(color, 0.12));
+      p.rect(0, 7, 10, 3, shade(color, 0.18)); p.hl(0, 7, 10, shade(color, 0.35));
+      p.rect(1, 10, 1, 4, '#5a3a2a'); p.rect(8, 10, 1, 4, '#5a3a2a');
+    });
+    if (level === 3) return sprite(12, 14, (p) => {
+      p.ellipse(6, 4, 6, 4, '#2e2a36'); p.ellipse(6, 4, 5, 3, '#4a4458');
+      p.rect(1, 7, 10, 3, '#3a3644'); p.hl(1, 7, 10, '#5a5466');
+      p.vl(6, 10, 3, '#9a9aa8'); p.hl(2, 13, 9, '#9a9aa8');
+    });
+    return sprite(14, 16, (p) => {
+      const v = '#8a2a3e';
+      p.ellipse(7, 5, 7, 5, shade(v, -0.1)); p.ellipse(7, 5, 5, 4, v); p.px(5, 3, shade(v, 0.3)); p.px(9, 3, shade(v, 0.3));
+      p.rect(0, 8, 14, 4, v); p.hl(0, 8, 14, shade(v, 0.25)); p.rect(0, 8, 2, 5, shade(v, -0.15)); p.rect(12, 8, 2, 5, shade(v, -0.15));
+      p.hl(0, 12, 14, GOLD); p.rect(1, 13, 1, 3, GOLD); p.rect(12, 13, 1, 3, GOLD);
+    });
+  });
+}
+
+/** Wall climate unit (drawn on wall face). */
+export function climaL(level: number) {
+  return cached('clima' + level, () => {
+    if (level <= 0) return sprite(10, 12, (p) => { p.circle(5, 4, 4, '#9aa0aa'); p.circle(5, 4, 3, '#c8ccd4'); p.line(2, 4, 8, 4, '#7a808a'); p.line(5, 1, 5, 7, '#7a808a'); p.vl(5, 8, 3, '#7a808a'); p.hl(2, 11, 7, '#7a808a'); });
+    if (level === 1) return sprite(12, 12, (p) => { p.circle(6, 6, 5, '#e8e4dc'); p.circle(6, 6, 4, '#b8d8e8'); p.line(3, 3, 9, 9, '#7aa0b8'); p.line(9, 3, 3, 9, '#7aa0b8'); p.circle(6, 6, 1, '#4a6a80'); });
+    if (level === 2) return sprite(26, 8, (p) => { p.box(0, 0, 26, 8, '#f4f6f8', 0.1); p.hl(2, 6, 22, '#c8ccd4'); p.px(22, 2, '#5ae07a'); });
+    if (level === 3) return sprite(28, 7, (p) => { p.box(0, 0, 28, 7, '#3a3644', 0.15); p.hl(2, 5, 24, '#5a5666'); p.hl(3, 2, 6, '#7ad0e8'); p.px(24, 2, '#5ae07a'); });
+    return sprite(30, 8, (p) => { p.box(0, 0, 30, 8, '#f6f1e4', 0.1); p.hl(0, 0, 30, GOLD); p.hl(0, 7, 30, GOLD); p.hl(3, 5, 24, '#d8cfb8'); p.px(26, 2, '#7ad0e8'); });
+  });
+}
+
+/** Ceiling lighting hanging in front of the back wall. */
+export function luzL(level: number) {
+  return cached('luz' + level, () => {
+    if (level <= 0) return sprite(5, 12, (p) => { p.vl(2, 0, 8, '#3a3440'); p.circle(2, 9, 2, '#fff2b0'); p.px(2, 9, '#ffffff'); }, false);
+    if (level === 1) return sprite(14, 10, (p) => { p.vl(7, 0, 4, '#3a3440'); p.ellipse(7, 7, 6, 3, '#f2e6c8'); p.hl(2, 9, 11, '#fff6d8'); });
+    if (level === 2) return sprite(12, 14, (p) => { p.vl(6, 0, 6, '#3a3440'); p.rect(2, 6, 9, 5, '#58b06c'); p.hl(2, 6, 9, '#7ad08a'); p.rect(4, 11, 5, 2, '#fff2b0'); });
+    if (level === 3) return sprite(40, 8, (p) => { p.rect(0, 0, 40, 2, '#2e2a36'); for (const x of [4, 15, 26, 36]) { p.rect(x - 2, 2, 4, 4, '#2e2a36'); p.rect(x - 1, 6, 2, 1, '#fff2b0'); } });
+    return sprite(24, 18, (p) => {
+      p.vl(12, 0, 5, GOLD);
+      p.ellipse(12, 8, 10, 3, '#c9a640'); p.ellipse(12, 8, 8, 2, GOLD);
+      for (const x of [3, 7, 12, 17, 21]) { p.vl(x, 4, 4, GOLD); p.rect(x - 1, 3, 2, 2, '#fff6c8'); p.px(x, 2, '#ffffff'); }
+      for (const x of [5, 9, 15, 19]) { p.px(x, 11, '#d8f0ff'); p.px(x, 13, '#bfe4ff'); }
+      p.px(12, 15, '#d8f0ff'); p.px(12, 17, '#bfe4ff');
+    });
+  });
+}
+
+export function estanteL(level: number) {
+  return cached('est' + level, () => {
+    if (level <= 0) return sprite(16, 12, (p) => { p.box(0, 2, 16, 10, '#b8925a', 0.15); p.hl(2, 6, 12, '#9a7448'); p.rect(2, 0, 8, 3, '#f4efe2'); p.rect(5, 0, 8, 2, '#e8e2d2'); });
+    if (level === 1) return sprite(18, 14, (p) => { p.box(0, 0, 18, 14, '#b07040', 0.15); p.hl(1, 6, 16, '#8a5530'); for (let x = 2; x < 16; x += 3) p.rect(x, 1, 2, 5, ['#e05a4a', '#4f8fd8', '#f2c14e', '#58b06c'][x % 4]); p.rect(3, 8, 5, 4, '#f4efe2'); });
+    if (level === 2) return bookshelf(7);
+    if (level === 3) return sprite(22, 18, (p) => {
+      p.box(0, 0, 22, 18, '#2e2a36', 0.12); p.rect(1, 1, 20, 7, '#3a3644'); p.rect(1, 10, 20, 7, '#3a3644');
+      for (let x = 2; x < 20; x += 2) p.vl(x, 1, 7, ['#2a2632', '#e05a4a', '#2a2632', '#f2c14e', '#2a2632', '#4f8fd8'][x % 6]);
+      p.circle(6, 13, 3, '#1f1c26'); p.px(6, 13, '#e05a4a'); p.rect(12, 11, 7, 6, '#9b6bd1');
+    });
+    return sprite(24, 20, (p) => {
+      p.box(0, 0, 24, 20, '#5a2e1e', 0.15); p.hl(0, 0, 24, GOLD); p.hl(0, 19, 24, GOLD);
+      p.rect(2, 2, 20, 7, '#3a1e14'); p.rect(2, 11, 20, 7, '#3a1e14');
+      for (let x = 3; x < 21; x += 2) p.vl(x, 3, 6, ['#8a2a3e', '#2c3458', '#e8c25a'][x % 3]);
+      p.rect(4, 13, 4, 5, GOLD); p.rect(5, 12, 2, 1, GOLD); p.rect(12, 14, 8, 4, '#f4efe2');
+    });
+  });
+}
+
+export function sofaL(level: number) {
+  const col = ['#8a8070', '#8a7ab0', '#3fb7b0', '#2e2a36', '#8a2a3e'][level];
+  return level >= 4 ? cached('sofaLux', () => {
+    const c = sofa(col);
+    const [cv, g] = makeCanvas(c.width, c.height);
+    g.drawImage(c, 0, 0);
+    g.fillStyle = GOLD; g.fillRect(2, c.height - 4, c.width - 4, 1);
+    return cv;
+  }) : sofa(col);
+}
+
+export function tvL(level: number) {
+  return cached('tv' + level, () => sprite(level >= 3 ? 30 : 22, level >= 3 ? 17 : 14, (p) => {
+    const w = level >= 3 ? 30 : 22, h = level >= 3 ? 17 : 14;
+    p.box(0, 0, w, h, level >= 4 ? '#3a2e1e' : '#26232e', 0.1);
+    p.rect(1, 1, w - 2, h - 3, '#3a6aa8'); p.rect(2, 2, w - 4, 3, '#5a8ac8');
+    // music video on screen
+    p.rect(w / 2 - 3, h / 2 - 2, 6, 4, '#f2c14e'); p.px(w / 2 - 1, h / 2 - 1, '#e05a4a');
+    if (level >= 4) p.hl(0, h - 1, w, GOLD);
+  }));
+}
+
+export function framedArt(seed: number, gold = false) {
+  return cached('art' + seed + gold, () => sprite(16, 12, (p) => {
+    p.rect(0, 0, 16, 12, gold ? GOLD : '#7a4a2c');
+    p.rect(1, 1, 14, 10, gold ? '#b08a3a' : '#5a3a22');
+    const bg = ['#e8d0a0', '#b8d8f0', '#f0c8c0'][seed % 3];
+    p.rect(2, 2, 12, 8, bg);
+    p.ellipse(8, 9, 6, 2, ['#58b06c', '#4f8fd8', '#c24d6a'][seed % 3]);
+    p.circle(5 + (seed % 3) * 3, 5, 1, '#f2c14e');
+  }));
+}
+
+export function curtainWindow(level: number, night = false) {
+  return cached('cwin' + level + night, () => {
+    const w = windowSprite(night);
+    const [c, g] = makeCanvas(w.width + 8, w.height + 2);
+    g.drawImage(w, 4, 1);
+    const col = level >= 4 ? '#8a2a3e' : '#c24d6a';
+    g.fillStyle = col; g.fillRect(0, 0, 6, w.height + 2); g.fillRect(c.width - 6, 0, 6, w.height + 2);
+    g.fillStyle = level >= 4 ? GOLD : shade(col, 0.2); g.fillRect(0, 0, c.width, 2);
+    return c;
+  });
+}
+
+export function heldSpotlight() {
+  return cached('spotlight', () => sprite(8, 26, (p) => { p.vl(4, 6, 18, '#4a4a58'); p.hl(1, 24, 7, '#4a4a58'); p.rect(1, 0, 6, 6, '#2e2a36'); p.rect(2, 5, 4, 1, '#fff2b0'); }));
+}

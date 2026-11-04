@@ -4,7 +4,7 @@ import { BASE_PRICE, INVESTOR_LOOK } from '../game/game';
 import type { Teacher, Staff, Plot } from '../game/state';
 import { DAY_NAMES, firstName } from '../game/state';
 import { INSTRUMENTS, INSTRUMENT_IDS, InstrumentId } from '../data/instruments';
-import { CAMPAIGNS, CampaignId, DECOR_COST, DECOR_NAMES, DECOR_SKILL, PLOT_DEPOSIT, PLOT_RENT, ROOM_TYPES, RoomType, SKILL_MAP, STAFF_ROLES, TRAITS } from '../data/content';
+import { CAMPAIGNS, CampaignId, DECOR_COST, DECOR_NAMES, DECOR_SKILL, DECOR_WHAT, MAX_DECOR, ROOM_ITEMS, ItemId, PLOT_DEPOSIT, PLOT_RENT, ROOM_TYPES, RoomType, SKILL_MAP, STAFF_ROLES, TRAITS } from '../data/content';
 import { portraitURL } from '../art/characters';
 import { EVENT_DEFS } from '../game/events';
 
@@ -33,19 +33,32 @@ export function roomPanel(g: Game, i: number): string {
       return h + `<p>Um espaço vazio, cheio de caixas. Alugue para expandir a escola.</p>
         <div class="kv"><span>Caução</span><b>${money(PLOT_DEPOSIT)}</b></div>
         <div class="kv"><span>Aluguel</span><b>${money(PLOT_RENT)}/semana</b></div>
-        <button class="btn primary wide" data-act="rent" data-arg="${i}">🔑 Alugar espaço</button>`;
+        <button class="btn primary wide" data-act="rent" data-arg="${i}">🔑 ${g.expandLabel(i)}</button>
+        <p class="muted small">Tudo é pré-moldado: depois de alugar, você só escolhe o tipo de sala e ela vem montada.</p>`;
     }
-    return h + `<p class="muted">${s.chapter < 3 ? 'Por enquanto você só tem sua salinha.' : 'Desbloqueie <b>Novos Espaços / Prédio Inteiro</b> na árvore de habilidades (Expansão).'}</p>`;
+    return h + `<p class="muted">${s.chapter < 3 ? 'Por enquanto você só tem sua salinha.' : 'Só dá para expandir para espaços vizinhos aos seus. O andar de cima exige <b>Novos Espaços / Prédio Inteiro</b> (Expansão).'}</p>`;
   }
   const decorBlock = () => {
     const next = p.decor + 1;
-    let d = `<div class="sect">Ambiente: <b>${DECOR_NAMES[p.decor]}</b> ${'✦'.repeat(p.decor)}<span class="dim">${'✦'.repeat(3 - p.decor)}</span></div>`;
-    if (next <= 3) {
+    let d = `<div class="sect">Nível da sala: <b>${p.decor + 1}. ${DECOR_NAMES[p.decor]}</b> ${'✦'.repeat(p.decor + 1)}<span class="dim">${'✦'.repeat(MAX_DECOR - p.decor)}</span></div><div class="small muted">${DECOR_WHAT[p.decor]}</div>`;
+    if (next <= MAX_DECOR) {
       const sk = DECOR_SKILL[next];
       const locked = sk && !g.has(sk);
-      d += `<button class="btn ${locked ? 'ghost' : 'accent'} wide" data-act="decor" data-arg="${i}" ${locked ? 'disabled' : ''}>✨ Reformar para "${DECOR_NAMES[next]}" — ${money(DECOR_COST[next])}${locked ? ` <small>(requer ${SKILL_MAP[sk!].name})</small>` : ''}</button>`;
+      d += `<button class="btn ${locked ? 'ghost' : 'accent'} wide" data-act="decor" data-arg="${i}" ${locked ? 'disabled' : ''}>⬆️ Subir para nível ${next + 1} "${DECOR_NAMES[next]}" — ${money(DECOR_COST[next])}<small>${locked ? `requer ${SKILL_MAP[sk!].name}` : DECOR_WHAT[next] + ' Todos os móveis acompanham o novo nível.'}</small></button>`;
     }
-    return d;
+    return d + itemsBlock();
+  };
+  const itemsBlock = () => {
+    const list = (Object.keys(ROOM_ITEMS) as ItemId[]).filter((k) => ROOM_ITEMS[k].types.includes(p.type));
+    if (!list.length) return '';
+    let d = '<div class="sect">Móveis e equipamentos <small class="muted">(já vão para o lugar certo)</small></div><div class="grid4 items">';
+    for (const k of list) {
+      const def = ROOM_ITEMS[k];
+      const owned = p.items.includes(k);
+      const cost = Math.round(def.cost * (1 + p.decor * 0.5));
+      d += `<button class="buy-inst ${owned ? 'owned' : ''}" data-act="item" data-arg="${i}:${k}" ${owned ? 'disabled' : ''} title="${def.desc}"><span>${def.emoji}</span><b>${def.name}</b><small>${owned ? '✓ instalado' : money(cost)}</small></button>`;
+    }
+    return d + '</div>';
   };
   if (p.type === 'hall') {
     return h + `<p>A porta de entrada da escola. Sem recepção, os interessados ficam esperando em pé e você atende tudo sozinho.</p>

@@ -1,6 +1,6 @@
 import './style.css';
 import { Scene, SceneModel } from './game/scene';
-import { makeLayout } from './game/layout';
+import { makeLayout, setWorldWidth } from './game/layout';
 import { Game, BOSS_LOOK } from './game/game';
 import { UI } from './ui/ui';
 import { newGame, loadGame, saveGame, GameState } from './game/state';
@@ -20,22 +20,24 @@ window.addEventListener('resize', resize);
 resize();
 
 // ------------------------------------------------------------------ demo backdrop (title screen)
+const ALL = ['cadeiras', 'som', 'clima', 'luz', 'estante', 'plantas', 'sofa', 'tv'];
 function demoModel(): SceneModel {
   const layout = makeLayout(4);
   const plots = [
-    { index: 0, owned: true, type: 'classroom' as const, decor: 3, equip: { piano: 2, violino: 1, canto: 2 } },
-    { index: 1, owned: true, type: 'rehearsal' as const, decor: 3, equip: {} },
-    { index: 2, owned: true, type: 'classroom' as const, decor: 2, equip: { guitarra: 1, baixo: 1, bateria: 1 } },
-    { index: 3, owned: true, type: 'lounge' as const, decor: 2, equip: {} },
-    { index: 4, owned: true, type: 'reception' as const, decor: 3, equip: {} },
-    { index: 5, owned: true, type: 'classroom' as const, decor: 1, equip: { violao: 1, ukulele: 0 } },
-    { index: 6, owned: true, type: 'auditorium' as const, decor: 2, equip: {} },
-    { index: 7, owned: true, type: 'studio' as const, decor: 3, equip: {} },
+    { index: 0, owned: true, type: 'classroom' as const, decor: 4, equip: { piano: 2, violino: 1, canto: 2 }, items: ALL },
+    { index: 1, owned: true, type: 'rehearsal' as const, decor: 3, equip: {}, items: ALL },
+    { index: 2, owned: true, type: 'classroom' as const, decor: 3, equip: { guitarra: 1, baixo: 1, bateria: 1 }, items: ALL },
+    { index: 3, owned: true, type: 'lounge' as const, decor: 2, equip: {}, items: ALL },
+    { index: 4, owned: true, type: 'reception' as const, decor: 4, equip: {}, items: ALL },
+    { index: 5, owned: true, type: 'classroom' as const, decor: 1, equip: { violao: 1, ukulele: 0 }, items: ['cadeiras', 'plantas', 'som'] },
+    { index: 6, owned: true, type: 'auditorium' as const, decor: 2, equip: {}, items: ALL },
+    { index: 7, owned: true, type: 'studio' as const, decor: 3, equip: {}, items: ALL },
   ];
   return { layout, plots, sign: 'ESCOLA DE MÚSICA', signColor: '#c24d6a', version: -1 };
 }
 
 function demoAgents() {
+  setWorldWidth(640);
   const m = demoModel();
   scene.setModel(m, false);
   scene.agents = [];
@@ -65,22 +67,43 @@ let uiTimer = 0;
 function frame(now: number) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (game) game.update(dt);
-  else scene.update(dt, 1);
-  scene.render();
-  uiTimer += dt;
-  if (ui && uiTimer > 0.2) { uiTimer = 0; ui.tick(now); }
   requestAnimationFrame(frame);
+  try {
+    if (game) game.update(dt);
+    else scene.update(dt, 1);
+    scene.render();
+    uiTimer += dt;
+    if (ui && uiTimer > 0.2) { uiTimer = 0; ui.tick(now); }
+  } catch (err) { console.error(err); }
 }
 requestAnimationFrame(frame);
 
 // ------------------------------------------------------------------ input
 let down: { x: number; y: number; px: number; py: number; moved: boolean; id: number } | null = null;
+const touches = new Map<number, { x: number; y: number }>();
+let pinch0 = 0;
 canvas.addEventListener('pointerdown', (e) => {
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 2) {
+    const [a, b] = [...touches.values()];
+    pinch0 = Math.hypot(a.x - b.x, a.y - b.y);
+    if (down) down.moved = true;
+    return;
+  }
   down = { x: e.clientX, y: e.clientY, px: scene.panX, py: scene.panY, moved: false, id: e.pointerId };
   audio();
 });
+const endTouch = (e: PointerEvent) => { touches.delete(e.pointerId); if (touches.size < 2) pinch0 = 0; };
+window.addEventListener('pointercancel', endTouch);
 window.addEventListener('pointermove', (e) => {
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 2 && pinch0) {
+    const [a, b] = [...touches.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (d / pinch0 > 1.25) { scene.setZoom(0.5); pinch0 = d; }
+    else if (d / pinch0 < 0.8) { scene.setZoom(-0.5); pinch0 = d; }
+    return;
+  }
   if (down && down.id === e.pointerId) {
     const dx = e.clientX - down.x, dy = e.clientY - down.y;
     if (Math.hypot(dx, dy) > 6) down.moved = true;
@@ -94,6 +117,7 @@ window.addEventListener('pointermove', (e) => {
   canvas.style.cursor = a?.onClick ? 'pointer' : scene.hoverPlot >= 0 ? 'pointer' : 'grab';
 });
 window.addEventListener('pointerup', (e) => {
+  endTouch(e);
   if (!down || down.id !== e.pointerId) return;
   const wasDrag = down.moved;
   down = null;
@@ -115,7 +139,18 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('beforeunload', () => { if (game && !game.s.gameOver) saveGame(game.s); });
 
 // ------------------------------------------------------------------ start game
+export function goFullscreen() {
+  const el = document.documentElement as any;
+  try {
+    const p = el.requestFullscreen?.({ navigationUI: 'hide' }) ?? el.webkitRequestFullscreen?.();
+    Promise.resolve(p).then(() => (screen.orientation as any)?.lock?.('landscape')).catch(() => {});
+  } catch { /* ignore */ }
+}
+(window as any).__fullscreen = goFullscreen;
+const isTouch = matchMedia('(pointer: coarse)').matches;
+
 async function start(state: GameState, fresh: boolean) {
+  if (isTouch) goFullscreen();
   document.querySelector('.title-ov')?.remove();
   scene.zoom = 0;
   scene.panX = scene.panY = 0;

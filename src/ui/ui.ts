@@ -101,9 +101,9 @@ export class UI implements UIHooks {
       <div class="hud-right">
         <div class="card stat" title="Dinheiro em caixa"><span>💰</span><b class="px ${s.cash < 0 ? 'red' : ''}">${money(s.cash)}</b></div>
         ${fc ? `<div class="card stat" title="Previsão de lucro semanal"><span>📈</span><b class="px ${fc.profit < 0 ? 'red' : 'green'}">${fc.profit >= 0 ? '+' : ''}${money(fc.profit)}<small>/sem</small></b></div>` : ''}
-        ${s.chapter >= 2 ? `<div class="card stat" title="Alunos"><span>🎓</span><b class="px">${s.students.length}</b></div>` : ''}
+        ${s.chapter >= 2 ? `<div class="card stat students" title="Alunos"><span>🎓</span><b class="px">${s.students.length}</b></div>` : ''}
         ${inv ? `<div class="card stat trust" title="Confiança do investidor"><span>🤝</span><div class="tbar"><div style="width:${inv.trust}%" class="${inv.trust < 30 ? 'low' : ''}"></div></div><b class="px">${Math.round(inv.trust)}%</b></div>` : ''}
-        <div class="card stat icons"><button class="ico" data-act="music" title="Música">${isMusicOn() ? '🎵' : '🔇'}</button><button class="ico" data-act="sfx" title="Efeitos">${isSfxOn() ? '🔊' : '🔈'}</button><button class="ico" data-act="menu" title="Menu">☰</button></div>
+        <div class="card stat icons"><button class="ico" data-act="music" title="Música">${isMusicOn() ? '🎵' : '🔇'}</button><button class="ico" data-act="sfx" title="Efeitos">${isSfxOn() ? '🔊' : '🔈'}</button><button class="ico" data-act="fullscreen" title="Tela cheia">⛶</button><button class="ico" data-act="menu" title="Menu">☰</button></div>
       </div>`;
   }
 
@@ -168,7 +168,7 @@ export class UI implements UIHooks {
     const body = $('.panel-body', this.panelEl);
     let h = '';
     switch (this.panel) {
-      case 'room': h = roomPanel(g, this.panelArg); break;
+      case 'room': h = this.panelArg >= 0 && g.s.plots[this.panelArg] ? roomPanel(g, this.panelArg) : this.schoolOverview(); break;
       case 'team': h = teamPanel(g); break;
       case 'demand': h = demandPanel(g); break;
       case 'marketing': h = marketingPanel(g); break;
@@ -184,11 +184,16 @@ export class UI implements UIHooks {
 
   schoolOverview(): string {
     const g = this.g;
-    let h = '<div class="ptitle">🏫 Sua escola</div><p class="muted small">Clique em um espaço no mapa (ou aqui) para gerenciar.</p>';
+    let h = '<div class="ptitle">🏫 Sua escola</div><p class="muted small">Toque num espaço do mapa (ou aqui) para gerenciar. Tudo vem pré-montado.</p>';
     for (const p of g.s.plots) {
-      const sel = g.canRentPlot(p.index) && !p.owned;
-      if (!p.owned && !sel && p.index !== g.layout.hall) continue;
-      h += `<button class="room-row" data-act="room" data-arg="${p.index}"><b>${roomName(g, p)}</b><small>${p.owned ? ['Abandonado', 'Pintado', 'Aconchegante', 'Premium'][p.decor] + (p.type === 'classroom' ? ' · ' + Object.keys(p.equip).map((i) => INSTRUMENTS[i as InstrumentId].emoji).join(' ') : '') : sel ? 'Disponível para alugar' : 'Compartilhado'}</small></button>`;
+      if (!p.owned && p.index !== g.layout.hall) continue;
+      h += `<button class="room-row" data-act="room" data-arg="${p.index}"><b>${roomName(g, p)}</b><small>${p.owned ? `Nível ${p.decor + 1} · ${['Abandonado', 'Pintado', 'Aconchegante', 'Premium', 'Luxo'][p.decor]}` + (p.type === 'classroom' ? ' · ' + Object.keys(p.equip).map((i) => INSTRUMENTS[i as InstrumentId].emoji).join(' ') : '') : 'Compartilhado'}</small></button>`;
+    }
+    const exp = g.s.plots.filter((p) => g.canRentPlot(p.index));
+    if (g.s.chapter === 3) {
+      h += '<div class="sect">🧭 Expandir</div>';
+      h += exp.length ? exp.map((p) => `<button class="room-row exp" data-act="room" data-arg="${p.index}"><b>${g.expandLabel(p.index)}</b><small>espaço ${p.index + 1}</small></button>`).join('')
+        : '<p class="muted small">Nenhum espaço vizinho disponível. Desbloqueie o andar de cima em Expansão.</p>';
     }
     return h;
   }
@@ -220,7 +225,9 @@ export class UI implements UIHooks {
       case 'music': setMusic(!isMusicOn()); break;
       case 'sfx': setSfx(!isSfxOn()); break;
       case 'menu': this.menu(); break;
-      case 'rent': g.rentPlot(Number(arg)); this.renderPanel(); break;
+      case 'fullscreen': if (document.fullscreenElement) document.exitFullscreen?.(); else (window as any).__fullscreen?.(); break;
+      case 'rent': g.rentPlot(Number(arg)); this.openPanel('room', Number(arg)); break;
+      case 'item': { const [i, it] = arg.split(':'); g.buyItem(Number(i), it as any); this.renderPanel(); break; }
       case 'reception': g.buildReception(); this.renderPanel(); break;
       case 'build': { const [i, t] = arg.split(':'); g.buildRoom(Number(i), t as any); this.renderPanel(); break; }
       case 'decor': g.upgradeDecor(Number(arg)); this.renderPanel(); break;
@@ -324,7 +331,8 @@ export class UI implements UIHooks {
     t.className = 'toast ' + kind;
     t.innerHTML = text;
     this.toastsEl.prepend(t);
-    while (this.toastsEl.children.length > 5) this.toastsEl.lastElementChild?.remove();
+    const maxT = window.innerHeight <= 520 ? 2 : 5;
+    while (this.toastsEl.children.length > maxT) this.toastsEl.lastElementChild?.remove();
     setTimeout(() => t.classList.add('out'), 4200);
     setTimeout(() => t.remove(), 4700);
   }
@@ -588,12 +596,16 @@ export class UI implements UIHooks {
       <div class="m-opts">
         <button class="btn primary opt" data-k="back">Voltar ao jogo</button>
         <button class="btn opt" data-k="help">Como jogar</button>
+        <button class="btn opt" data-k="music">${isMusicOn() ? '🎵 Desligar música' : '🔇 Ligar música'}</button>
+        <button class="btn opt" data-k="sfx">${isSfxOn() ? '🔊 Desligar efeitos' : '🔈 Ligar efeitos'}</button>
         <button class="btn ghost opt" data-k="new">Apagar progresso e recomeçar</button>
       </div>`, 'choice');
     ov.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', async () => {
       const k = (b as HTMLElement).dataset.k;
       this.closeModal(ov);
       g.resume();
+      if (k === 'music') setMusic(!isMusicOn());
+      if (k === 'sfx') setSfx(!isSfxOn());
       if (k === 'help') {
         await this.dialog([
           { who: 'Dica', text: 'Clique nos espaços do prédio para construir salas, reformar e comprar instrumentos. Cada sala de aula comporta até 3 instrumentos.' },

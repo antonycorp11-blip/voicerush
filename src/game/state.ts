@@ -57,6 +57,7 @@ export interface Plot {
   type: RoomType;
   decor: number;
   equip: Partial<Record<InstrumentId, number>>; // tier
+  items: string[];
 }
 
 export interface Staff {
@@ -153,6 +154,7 @@ export interface GameState {
   trend: { instrument: InstrumentId; weeks: number } | null;
   gameOver: null | 'lost' | 'won';
   totalStudentsEver: number;
+  building: 1 | 2;
 }
 
 export interface Ch1Task {
@@ -187,7 +189,7 @@ export function firstName(full: string) {
 
 export function newGame(name: string, look: Look, instruments: InstrumentId[]): GameState {
   const plots: Plot[] = [];
-  for (let i = 0; i < 8; i++) plots.push({ index: i, owned: false, type: 'empty', decor: 0, equip: {} });
+  for (let i = 0; i < 8; i++) plots.push({ index: i, owned: false, type: 'empty', decor: 0, equip: {}, items: [] });
   const s: GameState = {
     version: 1,
     playerName: name,
@@ -229,6 +231,7 @@ export function newGame(name: string, look: Look, instruments: InstrumentId[]): 
     trend: null,
     gameOver: null,
     totalStudentsEver: 0,
+    building: 1,
   };
   return s;
 }
@@ -259,6 +262,8 @@ export function loadGame(): GameState | null {
     if (!raw) return null;
     const s = JSON.parse(raw) as GameState;
     if (s.version !== 1) return null;
+    s.building = s.building ?? 1;
+    for (const p of s.plots) p.items = p.items ?? [];
     return s;
   } catch { return null; }
 }

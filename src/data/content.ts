@@ -44,9 +44,31 @@ export const ROOM_TYPES: Partial<Record<RoomType, RoomTypeDef>> = {
 
 export const PLOT_RENT = 150; // per week per rented plot
 export const PLOT_DEPOSIT = 1500; // to rent a new space
-export const DECOR_COST = [0, 1200, 3500, 8500];
-export const DECOR_SKILL = [null, 'pintura', 'acustica', 'premium'];
-export const DECOR_NAMES = ['Abandonado', 'Pintado', 'Aconchegante', 'Premium'];
+export const DECOR_COST = [0, 1200, 3500, 8500, 18000];
+export const DECOR_SKILL = [null, 'pintura', 'acustica', 'premium', 'conforto'];
+export const DECOR_NAMES = ['Abandonado', 'Pintado', 'Aconchegante', 'Premium', 'Luxo'];
+export const MAX_DECOR = 4;
+export const DECOR_WHAT = [
+  'Concreto rachado, caixas, lâmpada pendurada.',
+  'Piso de madeira, paredes pintadas, mobília simples.',
+  'Piso de cerâmica, rodapé de madeira, janela, tapete e lousa.',
+  'Painéis acústicos de madeira, LED, monitores de estúdio, parquet.',
+  'Mármore, paredes azul-marinho com dourado, lustre de cristal, poltronas de veludo.',
+];
+
+export type ItemId = 'cadeiras' | 'som' | 'clima' | 'luz' | 'estante' | 'plantas' | 'sofa' | 'tv';
+export interface ItemDef { name: string; emoji: string; cost: number; desc: string; types: RoomType[] }
+/** Prefab items: each one has a fixed place in the room and follows the room level visually. */
+export const ROOM_ITEMS: Record<ItemId, ItemDef> = {
+  cadeiras: { name: 'Cadeiras', emoji: '🪑', cost: 300, desc: '+1 satisfação por aula. Necessárias para turmas confortáveis.', types: ['classroom', 'auditorium', 'lounge'] },
+  som: { name: 'Caixas de som', emoji: '🔊', cost: 500, desc: '+2 qualidade nas aulas / mais reservas.', types: ['classroom', 'rehearsal', 'auditorium', 'studio', 'reception', 'lounge'] },
+  clima: { name: 'Climatização', emoji: '❄️', cost: 600, desc: '+1 satisfação por aula (ninguém sofre no calor).', types: ['classroom', 'rehearsal', 'reception', 'lounge', 'auditorium', 'studio'] },
+  luz: { name: 'Iluminação', emoji: '💡', cost: 350, desc: '+2 qualidade / ambiente mais bonito.', types: ['classroom', 'rehearsal', 'reception', 'lounge', 'auditorium', 'studio'] },
+  estante: { name: 'Estante de partituras', emoji: '📚', cost: 400, desc: '+2 qualidade nas aulas.', types: ['classroom', 'studio'] },
+  plantas: { name: 'Plantas', emoji: '🪴', cost: 150, desc: '+1 satisfação. Deixa tudo mais vivo.', types: ['classroom', 'reception', 'lounge', 'rehearsal', 'studio', 'auditorium'] },
+  sofa: { name: 'Sofá de espera', emoji: '🛋️', cost: 700, desc: 'Interessados esperam mais e convertem melhor.', types: ['reception', 'studio', 'lounge'] },
+  tv: { name: 'TV com vídeos da escola', emoji: '📺', cost: 900, desc: '+5% de conversão na recepção / mais reservas.', types: ['reception', 'rehearsal', 'lounge'] },
+};
 
 export type StaffRole = 'vendedor' | 'secretaria' | 'coordenador';
 export const STAFF_ROLES: Record<StaffRole, { name: string; wage: number; desc: string; skill: string; emoji: string }> = {
@@ -101,7 +123,7 @@ export const SKILLS: SkillDef[] = [
   { id: 'acustica', name: 'Tratamento Acústico', branch: 'ambiente', tier: 2, cost: 1, req: ['pintura'], desc: 'Decoração nível 2. Bateria sem reclamação de vizinhos.' },
   { id: 'lounge', name: 'Café & Lounge', branch: 'ambiente', tier: 2, cost: 2, req: ['pintura'], desc: 'Libera construir um Café & Lounge.', minChapter: 3 },
   { id: 'premium', name: 'Design Premium', branch: 'ambiente', tier: 3, cost: 2, req: ['acustica'], desc: 'Decoração nível 3: o ambiente mais bonito da cidade.' },
-  { id: 'conforto', name: 'Experiência Premium', branch: 'ambiente', tier: 4, cost: 3, req: ['premium'], desc: '+4 satisfação semanal e alunos aceitam preços 10% maiores.' },
+  { id: 'conforto', name: 'Experiência Premium', branch: 'ambiente', tier: 4, cost: 3, req: ['premium'], desc: 'Decoração nível 4 (Luxo), +4 satisfação semanal e alunos aceitam preços 10% maiores.' },
   // Marketing
   { id: 'instagram', name: 'Instagram', branch: 'marketing', tier: 1, cost: 1, req: [], desc: 'Libera anúncios no Instagram e campanhas focadas.' },
   { id: 'indique', name: 'Indique um Amigo', branch: 'marketing', tier: 2, cost: 1, req: ['instagram'], desc: '+15% interessados (boca a boca).' },

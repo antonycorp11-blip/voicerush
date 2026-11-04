@@ -18,6 +18,7 @@ export interface PlotView {
   equip: Partial<Record<InstrumentId, number>>;
   rentable?: boolean;
   shared?: boolean; // building hall used but not owned
+  items?: string[];
 }
 
 export interface SceneModel {
@@ -26,6 +27,7 @@ export interface SceneModel {
   sign: string;
   signColor: string;
   version: number;
+  building?: number;
 }
 
 export type Bubble = 'q' | 'note' | 'excl' | 'zz' | 'heart' | 'coin' | 'sad' | null;
@@ -71,6 +73,7 @@ export interface RoomSpots {
   idle: Pt[];
 }
 
+const TOUCH = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 const NOTE_COLORS = ['#9b6bd1', '#4f8fd8', '#e8607a', '#f2a63a', '#3fb7b0'];
 
 export class Scene {
@@ -101,6 +104,7 @@ export class Scene {
   highlightPlots: Set<number> = new Set();
   plotLabels: Map<number, string> = new Map();
   dpr = 1;
+  railX = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -123,7 +127,10 @@ export class Scene {
     this.canvas.width = Math.round(w * dpr);
     this.canvas.height = Math.round(h * dpr);
     const fit = Math.min(this.canvas.width / WORLD_W, this.canvas.height / (WORLD_H - 40));
-    this.scale = Math.max(1, Math.floor(fit * 2) / 2) + this.zoom;
+    const rail = h <= 520 ? 68 * dpr : 0;
+    this.railX = -rail / 2;
+    const fit2 = Math.min((this.canvas.width - rail) / WORLD_W, this.canvas.height / (WORLD_H - 40));
+    this.scale = Math.max(1, Math.floor(Math.min(fit, fit2 + 0.25) * 2) / 2) + this.zoom;
     this.g.imageSmoothingEnabled = false;
   }
 
@@ -133,7 +140,8 @@ export class Scene {
   }
 
   setModel(m: SceneModel, night: boolean) {
-    const key = m.version + '|' + night;
+    if (this.world.width !== WORLD_W) { [this.world, this.wg] = makeCanvas(WORLD_W, WORLD_H); this.resize(); }
+    const key = m.version + '|' + night + '|' + WORLD_W;
     this.model = m;
     if (key === this.staticKey && this.staticLayer) return;
     this.staticKey = key;
@@ -264,6 +272,17 @@ export class Scene {
         p.hl(x + i, y + j, Math.min(16, w - i), shade(c, 0.12));
         p.vl(x + i, y + j, Math.min(16, h - j), shade(c, 0.06));
       }
+    } else if (tier >= 4) {
+      // marble with gold inlays
+      for (let j = 0; j < h; j += 16) for (let i = 0; i < w; i += 16) {
+        const dark = ((i + j) / 16) % 2 === 1;
+        const c = dark ? '#ddd6cc' : '#f4f0ea';
+        p.rect(x + i, y + j, Math.min(16, w - i), Math.min(16, h - j), c);
+        for (let k = 0; k < 6; k++) { const vx = x + i + Math.floor(hash(i, j + k, seed) * 15); const vy = y + j + Math.floor(hash(j, i + k, seed) * 15); if (vx < x + w && vy < y + h) p.px(vx, vy, dark ? '#c4bcb0' : '#d8d2c8'); }
+        p.hl(x + i, y + j, Math.min(16, w - i), '#c9a640');
+        p.vl(x + i, y + j, Math.min(16, h - j), '#c9a640');
+      }
+      p.dither(x, y, w, 3, 'rgba(255,240,200,0.35)');
     } else {
       // basket-weave parquet
       const cols = ['#a4683d', '#985f37', '#ae7346'];
@@ -309,6 +328,11 @@ export class Scene {
       p.hl(x, wy + 1, w, '#c48a56');
       for (let i = x + 4; i < x + w - 4; i += 16) { p.rect(i, wy + 3, 12, 7, '#a86e40'); p.hl(i, wy + 3, 12, '#9a6238'); }
       p.rect(x, y + h - 2, w, 2, '#7a4a2c');
+    } else if (tier >= 4) {
+      p.rect(x, y, w, h, '#2c3458');
+      p.rect(x, y, w, 3, '#f4ecd6'); p.hl(x, y + 3, w, '#e8c25a');
+      for (let i = x + 4; i < x + w - 8; i += 22) { p.rect(i, y + 7, 18, 13, '#323c64'); p.hl(i, y + 7, 18, '#c9a640'); p.hl(i, y + 19, 18, '#c9a640'); p.vl(i, y + 7, 13, '#c9a640'); p.vl(i + 17, y + 7, 13, '#c9a640'); }
+      p.rect(x, y + h - 8, w, 8, '#1e2440'); p.hl(x, y + h - 8, w, '#e8c25a'); p.hl(x, y + h - 1, w, '#c9a640');
     } else {
       p.rect(x, y, w, h, '#4a2e22');
       for (let i = 0; i < w; i += 4) { p.rect(x + i, y + 3, 3, h - 6, i % 8 === 0 ? '#8e5836' : '#9c6440'); p.vl(x + i, y + 3, h - 6, '#b07448'); }
@@ -341,27 +365,28 @@ export class Scene {
     }
     // rugs
     if (usable && tier >= 2 && (pv.type === 'classroom' || pv.type === 'reception' || pv.type === 'lounge' || pv.type === 'studio')) {
-      const rc = tier === 3 ? '#8a3a4a' : '#5a7ab0';
+      const rc = tier >= 4 ? '#7a1e2e' : tier === 3 ? '#8a3a4a' : '#5a7ab0';
       const rw = 56, rh = 26;
       const rx = cx - rw / 2, ry = f.y + f.h - rh - 8;
       p.rect(rx, ry, rw, rh, rc);
       p.rect(rx + 2, ry + 2, rw - 4, rh - 4, shade(rc, 0.2));
       p.rect(rx + 4, ry + 4, rw - 8, rh - 8, rc);
       for (let i = rx + 6; i < rx + rw - 6; i += 6) p.px(i, ry + rh / 2, shade(rc, 0.35));
-      for (let i = rx; i < rx + rw; i += 2) { p.px(i, ry - 1, '#efe4cf'); p.px(i, ry + rh, '#efe4cf'); }
+      for (let i = rx; i < rx + rw; i += 2) { p.px(i, ry - 1, tier >= 4 ? '#e8c25a' : '#efe4cf'); p.px(i, ry + rh, tier >= 4 ? '#e8c25a' : '#efe4cf'); }
     }
     // wall decor
     const wd = (img: HTMLCanvasElement, x: number, yy: number) => g.drawImage(img, Math.round(x), Math.round(yy));
     const wy = w.y;
     if (!usable) {
-      wd(P.signBoard('ALUGA-SE', '#c2412e'), cx - 22, wy + 8);
+      if (pv.rentable) wd(P.signBoard('EXPANDIR +', '#3f9a52'), cx - 24, wy + 8);
+      else wd(P.signBoard('ALUGA-SE', '#c2412e'), cx - 22, wy + 8);
       g.drawImage(P.boxes(pv.index), f.x + 10, f.y + f.h - 26);
       g.drawImage(P.boxes(pv.index + 1), f.x + f.w - 34, f.y + 10);
       // dim
       g.fillStyle = 'rgba(40,28,44,0.38)';
       g.fillRect(w.x + 2, w.y, w.w - 4, f.y + f.h - w.y);
       if (pv.rentable) {
-        g.fillStyle = 'rgba(255,230,140,0.10)';
+        g.fillStyle = 'rgba(140,255,160,0.16)';
         g.fillRect(f.x, f.y, f.w, f.h);
       }
       return;
@@ -378,31 +403,39 @@ export class Scene {
       wd(P.poster(pv.index + 2), left + 6, wy + 8);
       return;
     }
+    const items = pv.items ?? [];
+    const has = (k: string) => items.includes(k);
+    const zoneC = isBottom ? cx + 20 : cx - 15; // free wall spot (bottom rooms have a door in the middle)
     if (tier === 0) {
-      wd(P.poster(pv.index), left + 8, wy + 8);
+      wd(P.poster(pv.index), left + 4, wy + 9);
     } else if (tier === 1) {
-      wd(P.poster(pv.index), left + 6, wy + 8);
-      wd(P.wallClock(), right - 18, wy + 6);
+      wd(P.poster(pv.index), left + 4, wy + 8);
       if (!isBottom) wd(P.windowSprite(night), cx - 11, wy + 7);
+      else wd(P.poster(pv.index + 2), cx + 22, wy + 8);
     } else if (tier === 2) {
-      wd(P.windowSprite(night), left + 2, wy + 6);
-      if (pv.type === 'classroom') wd(P.whiteboard(), isBottom ? right - 32 : cx - 15, wy + 7);
-      else wd(P.poster(pv.index + 1), cx + (isBottom ? 18 : -6), wy + 7);
-      if (!isBottom) wd(P.poster(pv.index + 3), right - 14, wy + 7);
-      else wd(P.wallClock(), cx + 14, wy + 4);
-    } else {
+      wd(P.windowSprite(night), left, wy + 6);
+      if (pv.type === 'classroom') wd(P.whiteboard(), isBottom ? right - 62 : cx - 15, wy + 7);
+      else wd(P.poster(pv.index + 1), zoneC, wy + 7);
+      wd(P.wallClock(), right - 28, wy + 6);
+    } else if (tier === 3) {
       wd(P.acousticPanel('#5a3e5a'), left, wy + 6);
       wd(P.acousticPanel('#5a3e5a'), left + 12, wy + 6);
       wd(P.sconce(), left + 26, wy + 8);
       wd(P.vinylFrame(pv.index), isBottom ? cx + 14 : cx - 7, wy + 8);
       wd(P.guitarWall('#d0473f'), isBottom ? cx + 30 : cx + 12, wy + 7);
-      wd(P.sconce(), right - 30, wy + 8);
       wd(P.acousticPanel('#5a3e5a'), right - 22, wy + 6);
       wd(P.acousticPanel('#5a3e5a'), right - 10, wy + 6);
+    } else {
+      wd(P.curtainWindow(4, night), left - 2, wy + 5);
+      wd(P.framedArt(pv.index, true), isBottom ? cx + 16 : cx - 8, wy + 8);
+      wd(P.sconce(), isBottom ? cx + 36 : cx + 12, wy + 9);
+      wd(P.framedArt(pv.index + 1, true), right - 18, wy + 8);
     }
-    if (pv.type === 'reception') {
-      wd(P.trophyShelf(), left + 30, wy + 12);
-    }
+    if (pv.type === 'reception' && tier >= 1) wd(P.trophyShelf(), isBottom ? cx + 18 : left + 30, wy + 12);
+    if (has('tv')) { const tv = P.tvL(tier); wd(tv, isBottom ? cx + 14 : cx - tv.width / 2, wy + 5); }
+    if (has('clima')) { const c = P.climaL(tier); wd(c, right - c.width - 2, wy + (tier >= 2 ? 1 : 3)); }
+    const lamp = P.luzL(has('luz') ? tier : 0);
+    if (has('luz') || tier === 0) wd(lamp, left + 46 - lamp.width / 2, wy);
   }
 
   // ------------------------------------------------------------------ props
@@ -423,6 +456,10 @@ export class Scene {
       if (!usable) continue;
       const tier = pv.decor;
       const fx = f.x, fy = f.y, fw = f.w, fh = f.h;
+      const items = pv.items ?? [];
+      const has = (k: string) => items.includes(k);
+      const plantImg = () => P.plant(tier >= 3 ? 2 : tier >= 2 ? 1 : 0);
+      const speakersAt = (x1: number, x2: number, y: number) => { add(P.speakerL(tier), x1, y); add(P.speakerL(tier), x2, y); };
       sp.idle.push({ x: cx - 30, y: fy + fh - 14 }, { x: cx + 30, y: fy + fh - 14 }, { x: cx, y: fy + fh - 20 });
       switch (pv.type) {
         case 'classroom': {
@@ -443,25 +480,30 @@ export class Scene {
           });
           sp.teacher = { x: cx + 14, y: fy + 46 };
           for (let j = 0; j < 6; j++) sp.chairs.push({ x: fx + 18 + j * 17, y: fy + fh - 6 });
-          if (tier === 0) add(P.boxes(pv.index + 2), fx + fw - 14, fy + fh - 2);
-          if (tier >= 1) add(P.plant(tier >= 3 ? 2 : tier >= 2 ? 1 : 0), fx + 8, fy + fh - 2);
-          if (tier >= 1) add(P.chair('#c47a4a'), fx + fw - 10, fy + fh - 6);
-          if (tier >= 2) add(P.musicStand(), cx - 30, fy + fh - 18);
-          if (tier >= 3) add(P.floorLamp(), fx + fw - 6, fy + 26);
+          // prefab item spots (fixed positions, style follows room level)
+          if (has('som')) speakersAt(fx + 6, fx + fw - 6, fy + 22);
+          if (has('plantas')) { add(plantImg(), fx + 8, fy + fh - 2); if (tier >= 3) add(P.plant(1), fx + fw - 30, fy + fh - 2); }
+          if (has('estante')) add(P.estanteL(tier), fx + fw - 14, fy + fh - 2);
+          else if (tier === 0) add(P.boxes(pv.index + 2), fx + fw - 14, fy + fh - 2);
+          if (has('cadeiras')) for (const x of [fx + 24, fx + 38, fx + fw - 52, fx + fw - 38]) add(P.chairL(tier, ['#c47a4a', '#c47a4a', '#3fb7b0', '#2e2a36', '#8a2a3e'][tier]), x, fy + fh - 5);
+          else if (tier >= 1) add(P.chairL(0), fx + fw - 34, fy + fh - 5);
+          if (tier >= 2) add(P.musicStand(), cx - 30, fy + fh - 20);
+          if (tier >= 3) add(P.floorLamp(), fx + 6, fy + 50);
           break;
         }
         case 'hall':
         case 'reception': {
           const rec = pv.type === 'reception';
           if (rec) {
-            add(P.counter(tier, 50), fx + fw - 30, fy + 34);
+            add(P.counter(Math.min(3, tier), 50), fx + fw - 30, fy + 34);
             sp.staff.push({ x: fx + fw - 40, y: fy + 20 }, { x: fx + fw - 22, y: fy + 20 }, { x: fx + fw - 50, y: fy + 18 });
-            add(P.sofa(tier >= 2 ? '#3fb7b0' : '#8a7ab0'), fx + 24, fy + fh - 2);
+            if (has('sofa')) { add(P.sofaL(tier), fx + 24, fy + fh - 2); if (tier >= 2) add(P.coffeeTable(), fx + 50, fy + fh - 4); }
+            else add(P.chairL(0), fx + 20, fy + fh - 6);
             sp.wait.push({ x: fx + 14, y: fy + fh - 12 }, { x: fx + 26, y: fy + fh - 12 }, { x: fx + 38, y: fy + fh - 12 }, { x: fx + fw - 44, y: fy + 48 }, { x: fx + fw - 30, y: fy + 50 }, { x: fx + fw - 16, y: fy + 48 });
-            add(P.waterCooler(), fx + 8, fy + 28);
-            if (tier >= 1) add(P.plant(tier >= 2 ? 1 : 0), fx + fw - 6, fy + fh - 2);
-            if (tier >= 2) add(P.coffeeTable(), fx + 30, fy + fh - 18 + 12);
-            if (tier >= 3) add(P.plant(2), fx + 50, fy + 26);
+            if (tier >= 1) add(P.waterCooler(), fx + 8, fy + 28);
+            if (has('plantas')) { add(plantImg(), fx + fw - 6, fy + fh - 2); if (tier >= 3) add(P.plant(2), fx + 50, fy + 26); }
+            if (has('som')) add(P.speakerL(tier), fx + 22, fy + 22);
+            if (tier >= 4) add(P.floorLamp(), fx + 6, fy + 50);
           } else {
             add(P.plant(0), fx + 8, fy + 30);
             add(P.boxes(3), fx + fw - 16, fy + 30);
@@ -485,6 +527,9 @@ export class Scene {
           add(P.micStand(t), cx + 16, fy + 40);
           add(P.keyboard(Math.min(1, t)), fx + fw - 24, fy + 50);
           add(P.stringOnStand('guitarra', t), fx + 10, fy + 56);
+          if (has('som')) speakersAt(fx + 4, fx + fw - 4, fy + 46);
+          if (has('plantas')) add(plantImg(), fx + 8, fy + fh - 2);
+          if (has('luz') && tier >= 2) { add(P.heldSpotlight(), fx + 30, fy + fh - 2); add(P.heldSpotlight(), fx + fw - 30, fy + fh - 2); }
           sp.band.push({ x: cx - 26, y: fy + 22 }, { x: cx + 16, y: fy + 36 }, { x: fx + 30, y: fy + 46 }, { x: fx + fw - 24, y: fy + 44 });
           break;
         }
@@ -492,10 +537,11 @@ export class Scene {
           add(P.cafeCounter(), fx + 26, fy + 28);
           sp.staff.push({ x: fx + 24, y: fy + 14 });
           add(P.cafeTable(), fx + 70, fy + 40);
-          add(P.chair('#f08a3e'), fx + 60, fy + 42);
-          add(P.chair('#f08a3e'), fx + 82, fy + 42);
-          add(P.sofa('#e8a64a'), fx + fw - 26, fy + fh - 4);
-          add(P.plant(1), fx + fw - 8, fy + 30);
+          add(P.chairL(has('cadeiras') ? tier : 0, '#f08a3e'), fx + 60, fy + 42);
+          add(P.chairL(has('cadeiras') ? tier : 0, '#f08a3e'), fx + 82, fy + 42);
+          if (has('sofa')) add(P.sofaL(tier), fx + fw - 26, fy + fh - 4);
+          if (has('plantas')) add(plantImg(), fx + fw - 8, fy + 30);
+          if (has('som')) add(P.speakerL(tier), fx + 8, fy + fh - 4);
           sp.wait.push({ x: fx + 60, y: fy + 36 }, { x: fx + 82, y: fy + 36 }, { x: fx + fw - 34, y: fy + fh - 12 }, { x: fx + fw - 20, y: fy + fh - 12 });
           break;
         }
@@ -503,24 +549,27 @@ export class Scene {
           add(P.stage(fw - 20), cx, fy + 26);
           add(P.keyboard(2), cx - 24, fy + 14);
           add(P.micStand(1), cx + 18, fy + 18);
-          add(P.speaker(), fx + 14, fy + 18);
-          add(P.speaker(), fx + fw - 14, fy + 18);
+          if (has('som')) speakersAt(fx + 8, fx + fw - 8, fy + 22);
+          else { add(P.speaker(), fx + 14, fy + 18); add(P.speaker(), fx + fw - 14, fy + 18); }
+          if (has('plantas')) { add(plantImg(), fx + 6, fy + fh - 2); add(plantImg(), fx + fw - 6, fy + fh - 2); }
           sp.stage.push({ x: cx - 24, y: fy + 4 }, { x: cx + 18, y: fy + 10 }, { x: cx, y: fy + 12 }, { x: cx - 8, y: fy + 8 });
           for (let r = 0; r < 3; r++) for (let k = 0; k < 7; k++) {
             if (k === 3) continue; // aisle
             const x = fx + 14 + k * 16;
             const y = fy + 42 + r * 12;
-            add(P.audienceChair(tier >= 2 ? '#c24d6a' : '#8a6a5a'), x, y);
+            add(has('cadeiras') ? P.chairL(Math.max(1, tier), '#c24d6a') : P.audienceChair('#8a6a5a'), x, y);
             sp.audience.push({ x, y: y - 4 });
           }
           break;
         }
         case 'studio': {
           add(P.mixingDesk(), fx + 30, fy + 30);
-          add(P.speaker(), fx + 10, fy + 20);
-          add(P.speaker(), fx + 50, fy + 20);
+          if (has('som')) speakersAt(fx + 10, fx + 50, fy + 22);
+          else { add(P.speaker(), fx + 10, fy + 20); add(P.speaker(), fx + 50, fy + 20); }
           add(P.micStand(2), fx + fw - 24, fy + 34);
-          add(P.sofa('#4f8fd8'), fx + 30, fy + fh - 2);
+          if (has('sofa')) add(P.sofaL(tier), fx + 30, fy + fh - 2);
+          if (has('estante')) add(P.estanteL(tier), fx + fw - 12, fy + fh - 2);
+          if (has('plantas')) add(plantImg(), fx + 6, fy + fh - 2);
           sp.staff.push({ x: fx + 30, y: fy + 18 });
           sp.band.push({ x: fx + fw - 28, y: fy + 30 }, { x: fx + fw - 14, y: fy + 40 });
           break;
@@ -700,7 +749,7 @@ export class Scene {
     sg.fillRect(0, 0, cw, ch);
     const s = this.scale;
     const ww = WORLD_W * s, wh = WORLD_H * s;
-    this.ox = Math.round((cw - ww) / 2 + this.panX);
+    this.ox = Math.round((cw - ww) / 2 + this.panX + this.railX);
     this.oy = Math.round((ch - wh) / 2 + this.panY + 6 * this.dpr);
     this.clampPan();
     sg.imageSmoothingEnabled = false;
@@ -796,12 +845,14 @@ export class Scene {
     const nice = hall.owned && hall.decor >= 1;
     const y = FRONT_Y;
     const hx = plotCx(L, L.hall);
-    const col = nice ? (hall.decor >= 3 ? '#3a2e3e' : '#e8dcc4') : '#b5a58c';
+    const modern = (this.model!.building ?? 1) >= 2;
+    const col = modern ? '#3a4a5e' : nice ? (hall.decor >= 3 ? '#3a2e3e' : '#e8dcc4') : '#b5a58c';
     const seg = (x0: number, x1: number) => {
       p.rect(x0, y - 1, x1 - x0, 3, '#5e4b56');
       p.hl(x0, y - 1, x1 - x0, '#7a6670');
       p.rect(x0, y + 2, x1 - x0, 7, col);
-      if (!nice) for (let x = x0; x < x1; x += 8) { p.vl(x, y + 2, 7, shade(col, -0.12)); p.hl(x0, y + 5, x1 - x0, shade(col, -0.1)); }
+      if (modern) for (let x = x0 + 2; x < x1 - 6; x += 10) { p.rect(x, y + 3, 7, 4, '#9fd4f2'); p.px(x + 1, y + 3, '#e8f6ff'); }
+      else if (!nice) for (let x = x0; x < x1; x += 8) { p.vl(x, y + 2, 7, shade(col, -0.12)); p.hl(x0, y + 5, x1 - x0, shade(col, -0.1)); }
       p.hl(x0, y + 8, x1 - x0, shade(col, -0.3));
     };
     seg(bx0 - 3, hx - 12);
@@ -824,7 +875,8 @@ export class Scene {
     let best: Agent | null = null;
     for (const a of this.agents) {
       if (!a.clickable || a.hidden) continue;
-      if (pt.x >= a.x - 9 && pt.x <= a.x + 9 && pt.y >= a.y - 40 && pt.y <= a.y + 2) {
+      const pad = TOUCH ? 6 : 0;
+      if (pt.x >= a.x - 9 - pad && pt.x <= a.x + 9 + pad && pt.y >= a.y - 40 - pad && pt.y <= a.y + 2 + pad) {
         if (!best || a.y > best.y) best = a;
       }
     }

@@ -277,6 +277,20 @@ export const EVENT_DEFS: Record<string, EventDef> = {
       { label: 'Entendido!', apply: (g, ev) => { g.s.trend = { instrument: ev.data.inst, weeks: 3 }; return 'Procura em alta.'; } },
     ],
   },
+  aluguel: {
+    id: 'aluguel', category: 'mercado', emoji: '🏢', ignore: 1, urgent: true, weight: 4,
+    when: (g) => (g.s.chapter === 3 && g.s.building === 1 && (g.s.investor?.week ?? 0) >= 6 && !g.s.flags.rentEvent ? ((g.s.flags.rentEvent = 1), {}) : null),
+    title: () => 'O dono do prédio quer reajustar o aluguel!',
+    text: () => 'O proprietário avisou: o aluguel vai subir 70% no mês que vem. Um corretor ofereceu um prédio novo, maior (10 espaços) e moderno, com aluguel 10% mais barato por sala. A mudança é feita por uma empresa: todas as salas, instrumentos e móveis são remontados do mesmo jeito lá.',
+    options: [
+      { label: '🚚 Mudar para o prédio novo (R$ 6.000)', hint: 'Prédio maior, fachada moderna, mais espaço para crescer.', apply: (g) => {
+        if (!g.spend(6000, 'Mudança de prédio')) { g.s.flags.rentMult = 1.7; return 'Sem dinheiro para a mudança… o aluguel subiu 70%.'; }
+        g.moveBuilding(); return 'Bem-vindo ao prédio novo! 🎉';
+      } },
+      { label: '✍️ Aceitar o reajuste (+70%)', apply: (g) => { g.s.flags.rentMult = 1.7; return 'Aluguel reajustado.'; } },
+      { label: '🤝 Tentar negociar', hint: '50%: reajuste de 30%. 50%: ele fica bravo (+90%).', apply: (g) => { if (Math.random() < 0.5) { g.s.flags.rentMult = 1.3; return 'Negociação boa: só +30%.'; } g.s.flags.rentMult = 1.9; return 'Ele não gostou… +90%.'; } },
+    ],
+  },
   aporte: {
     id: 'aporte', category: 'oportunidade', emoji: '🤝', ignore: 1,
     title: () => 'O investidor está empolgado',

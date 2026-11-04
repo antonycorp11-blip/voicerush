@@ -4,7 +4,7 @@ import { randomLook } from '../art/characters';
 import type { InstrumentId, MinigameKind } from '../data/instruments';
 import { INSTRUMENTS, INSTRUMENT_IDS } from '../data/instruments';
 import {
-  CAMPAIGNS, CampaignId, DECOR_COST, DECOR_SKILL, PLOT_DEPOSIT, PLOT_RENT, ROOM_TYPES, RoomType, SKILL_MAP,
+  CAMPAIGNS, CampaignId, DECOR_COST, DECOR_SKILL, MAX_DECOR, ROOM_ITEMS, ItemId, PLOT_DEPOSIT, PLOT_RENT, ROOM_TYPES, RoomType, SKILL_MAP,
   STAFF_ROLES, StaffRole, TRAITS, TraitId, RIVAL_FOCUS,
 } from '../data/content';
 import {
@@ -12,6 +12,7 @@ import {
   randomName, firstName, playerTeacher, saveGame, DAY_NAMES, Ch1Task, WeekStats,
 } from './state';
 import { Scene, SceneModel, Agent, PlotView } from './scene';
+import { setWorldWidth, plotRow, plotCol } from './layout';
 import { Layout, makeLayout, pathTo, pathBetween, pathToStreet, plotCx, plotFloor, SIDEWALK_Y, WORLD_W, Pt } from './layout';
 import { sfx } from '../audio';
 import { EVENT_DEFS, rollEvent } from './events';
@@ -90,7 +91,8 @@ export class Game {
   constructor(s: GameState, scene: Scene) {
     this.s = s;
     this.scene = scene;
-    this.layout = makeLayout(s.chapter === 1 ? 2 : 4);
+    setWorldWidth(s.building === 2 && s.chapter > 1 ? 768 : 640);
+    this.layout = makeLayout(s.chapter === 1 ? 2 : s.building === 2 ? 5 : 4);
   }
 
   // ------------------------------------------------------------------ helpers
@@ -150,10 +152,10 @@ export class Game {
     let signColor = '#c24d6a';
     if (s.chapter === 1) {
       plots = [
-        { index: 0, owned: true, type: 'office', decor: 2, equip: {} },
-        { index: 1, owned: true, type: 'classroom', decor: 2, equip: { violao: 1, piano: 1, guitarra: 1 } },
-        { index: 2, owned: true, type: 'reception', decor: 2, equip: {} },
-        { index: 3, owned: true, type: 'classroom', decor: 2, equip: { canto: 1, bateria: 1, ukulele: 1 } },
+        { index: 0, owned: true, type: 'office', decor: 2, equip: {}, items: ['luz', 'clima'] },
+        { index: 1, owned: true, type: 'classroom', decor: 2, equip: { violao: 1, piano: 1, guitarra: 1 }, items: ['som', 'plantas', 'estante', 'luz'] },
+        { index: 2, owned: true, type: 'reception', decor: 2, equip: {}, items: ['sofa', 'plantas', 'tv', 'clima'] },
+        { index: 3, owned: true, type: 'classroom', decor: 2, equip: { canto: 1, bateria: 1, ukulele: 1 }, items: ['som', 'cadeiras', 'clima', 'luz'] },
       ];
       sign = 'ESTÚDIO SOM MAIOR';
       signColor = '#3f74c9';
@@ -164,13 +166,14 @@ export class Game {
         type: p.type,
         decor: p.decor,
         equip: p.equip,
+        items: p.items,
         shared: !p.owned && p.index === this.layout.hall,
         rentable: !p.owned && this.canRentPlot(p.index),
       }));
       if (s.chapter === 2) { sign = 'AULAS - SALA 2'; signColor = '#d08a2a'; }
       else sign = s.plots[this.layout.hall].type === 'reception' ? 'ESCOLA DE MÚSICA' : 'ESCOLA - EM OBRAS';
     }
-    return { layout: this.layout, plots, sign, signColor, version: this.modelVersion };
+    return { layout: this.layout, plots, sign, signColor, version: this.modelVersion, building: s.chapter > 1 ? s.building : 1 };
   }
 
   invalidateScene() {
@@ -310,7 +313,10 @@ export class Game {
     if (opts.player) q = opts.score != null && opts.score >= 0 ? 28 + opts.score * 0.62 : 50;
     else if (t) q = 22 + t.skill * 11 + (t.morale - 60) * 0.12 + (t.traits.includes('virtuoso') ? 8 : 0);
     else q = 50;
-    if (plot) q += (plot.equip[inst] ?? 0) * 6 + plot.decor * 3.5;
+    if (plot) {
+      q += (plot.equip[inst] ?? 0) * 6 + plot.decor * 3.5;
+      for (const it of ['som', 'luz', 'estante']) if (plot.items.includes(it)) q += 2;
+    }
     if (this.has('metodo')) q += 5;
     if (this.has('apostilas')) q += 5;
     if (this.has('mestre')) q += 10;
@@ -334,6 +340,8 @@ export class Game {
     pf = Math.max(0.02, Math.min(1.35, pf));
     const pref = kind === lead.pref ? 1 : 0.55;
     let c = 0.62 * pf * pref + extra;
+    const rec = this.s.plots.find((p) => p.owned && p.type === 'reception');
+    if (rec) c += 0.03 + rec.items.length * 0.012 + (rec.items.includes('tv') ? 0.03 : 0) + rec.decor * 0.01;
     if (this.has('precificacao')) c += 0.1;
     if (this.s.rivals.some((r) => r.alive && r.promo > 0)) c *= 0.9;
     return Math.max(0.02, Math.min(0.95, c));
@@ -435,7 +443,7 @@ export class Game {
       instrument: inst,
       pref,
       sens: 0.15 + Math.random() * 0.85,
-      until: this.absMinute + 240,
+      until: this.absMinute + 240 + (this.s.plots.some((p) => p.owned && p.items.includes('sofa')) ? 90 : 0),
       agent: null,
       ...preset,
     };
@@ -746,6 +754,7 @@ export class Game {
         let d = (q - exp) * 0.22;
         if (t?.traits.includes('carismatico') && !l.sub) d += 1.5;
         if (l.player && l.score != null && l.score >= 85) d += 3;
+        if (plot) for (const it of ['cadeiras', 'clima', 'plantas']) if (plot.items.includes(it)) d += 0.4;
         st.sat = Math.max(0, Math.min(100, st.sat + d));
         if (!st.unpaid) revenue += st.fee / 4;
         if (this.hasRoom('lounge') && Math.random() < 0.35) revenue += 8;
@@ -800,7 +809,7 @@ export class Game {
       if (p.type === 'rehearsal') {
         const ok = (s.day < 5 && hour >= 17) || (s.day === 5 && hour >= 9);
         if (!ok) continue;
-        const prob = Math.min(0.92, (0.35 + p.decor * 0.12) * Math.pow(50 / Math.max(10, s.prices.rehearsal), 1.2));
+        const prob = Math.min(0.94, (0.3 + p.decor * 0.1 + p.items.length * 0.05) * Math.pow(50 / Math.max(10, s.prices.rehearsal), 1.2));
         if (Math.random() < prob) {
           const price = s.prices.rehearsal;
           const sp = this.scene.roomSpots(p.index);
@@ -1003,6 +1012,8 @@ export class Game {
     const s = this.s;
     let rent = 0;
     for (const p of s.plots) if (p.owned) rent += s.chapter === 2 ? 200 : p.index === this.layout.hall ? 80 : PLOT_RENT;
+    rent *= s.flags.rentMult ?? 1;
+    if (s.building === 2) rent *= 0.9;
     if (this.has('planilha')) rent *= 0.92;
     const staff = s.staff.reduce((a, b) => a + b.wage, 0);
     return { rent: Math.round(rent), staff };
@@ -1202,14 +1213,77 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ actions
+  /** Expansion is directional: only spaces next to (or right above) one you own. */
   canRentPlot(i: number) {
     const s = this.s;
     if (s.chapter < 3) return false;
     const L = this.layout;
-    if (i === L.hall) return false;
-    if (i >= L.cols) return true; // bottom row
-    if (i <= 1) return this.has('expansao1');
-    return this.has('expansao2');
+    if (i === L.hall || s.plots[i]?.owned) return false;
+    if (i < L.cols) {
+      const half = Math.ceil(L.cols / 2);
+      if (i < half ? !this.has('expansao1') : !this.has('expansao2')) return false;
+    }
+    return this.neighbors(i).some((n) => s.plots[n]?.owned);
+  }
+
+  neighbors(i: number) {
+    const L = this.layout;
+    const r = plotRow(L, i), c = plotCol(L, i);
+    const out: number[] = [];
+    if (c > 0) out.push(i - 1);
+    if (c < L.cols - 1) out.push(i + 1);
+    out.push(r === 0 ? i + L.cols : i - L.cols);
+    return out;
+  }
+
+  /** Human label for an expansion direction. */
+  expandLabel(i: number) {
+    const L = this.layout;
+    const s = this.s;
+    const n = this.neighbors(i).find((k) => s.plots[k]?.owned);
+    if (n === undefined) return 'Expandir';
+    if (plotRow(L, n) !== plotRow(L, i)) return plotRow(L, i) === 0 ? '⬆️ Subir para o andar de cima' : '⬇️ Descer para o térreo';
+    return plotCol(L, i) > plotCol(L, n) ? `➡️ Expandir para a direita${plotRow(L, i) === 0 ? ' (andar de cima)' : ' (térreo)'}` : `⬅️ Expandir para a esquerda${plotRow(L, i) === 0 ? ' (andar de cima)' : ' (térreo)'}`;
+  }
+
+  buyItem(i: number, id: ItemId) {
+    const p = this.s.plots[i];
+    const def = ROOM_ITEMS[id];
+    if (!p.owned || p.items.includes(id) || !def.types.includes(p.type)) return;
+    const cost = Math.round(def.cost * (1 + p.decor * 0.5));
+    if (!this.spend(cost, 'Móveis e equipamentos')) return;
+    p.items.push(id);
+    sfx.build();
+    const f = plotFloor(this.layout, i);
+    this.scene.sparkle(plotCx(this.layout, i), f.y + 30, 14);
+    this.ui.toast(`${def.emoji} ${def.name} instalado(a) no lugar certo!`, 'good');
+    this.addXP(4);
+    this.invalidateScene();
+    this.placeStaff();
+  }
+
+  /** Move everything to a bigger, modern building (pre-built layout). */
+  moveBuilding() {
+    const s = this.s;
+    if (s.building === 2) return;
+    const oldCols = 4, newCols = 5;
+    const map = (i: number) => (i < oldCols ? i : i - oldCols + newCols);
+    const plots: Plot[] = [];
+    for (let i = 0; i < newCols * 2; i++) plots.push({ index: i, owned: false, type: 'empty', decor: 0, equip: {}, items: [] });
+    for (const p of s.plots) { const ni = map(p.index); plots[ni] = { ...p, index: ni }; }
+    for (const st of s.students) st.plot = map(st.plot);
+    for (const c of s.contracts) c.plot = map(c.plot);
+    s.plots = plots;
+    s.building = 2;
+    s.flags.rentMult = 1;
+    setWorldWidth(768);
+    this.layout = makeLayout(newCols);
+    this.scene.zoom = 0;
+    this.scene.panX = this.scene.panY = 0;
+    this.invalidateScene();
+    this.setupWorldAgents();
+    this.ui.toast('🚚 Mudança concluída! Todas as salas foram remontadas no prédio novo.', 'good');
+    this.addXP(50);
   }
 
   rentPlot(i: number) {
@@ -1219,7 +1293,7 @@ export class Game {
     p.owned = true;
     p.type = 'empty';
     sfx.build();
-    this.ui.toast('🔑 Novo espaço alugado! Agora escolha o que construir.', 'good');
+    this.ui.toast('🔑 Espaço novo! Agora escolha o que construir.', 'good');
     this.invalidateScene();
     this.placeStaff();
   }
@@ -1245,6 +1319,7 @@ export class Game {
     const p = this.s.plots[this.layout.hall];
     if (p.type === 'reception') return;
     if (!this.spend(2500, 'Obras e expansão')) return;
+    p.items = p.items ?? [];
     p.type = 'reception';
     p.decor = Math.max(1, p.decor);
     sfx.build();
@@ -1259,7 +1334,7 @@ export class Game {
   upgradeDecor(i: number) {
     const p = this.s.plots[i];
     const next = p.decor + 1;
-    if (next > 3) return;
+    if (next > MAX_DECOR) return;
     const sk = DECOR_SKILL[next];
     if (sk && !this.has(sk)) { this.ui.toast('Precisa desbloquear na árvore de habilidades.', 'bad'); return; }
     if (!this.spend(DECOR_COST[next], 'Obras e expansão')) return;
