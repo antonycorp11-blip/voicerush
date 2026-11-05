@@ -66,6 +66,7 @@ export interface UIHooks {
   weekReport(s: WeekStats, extra: { rent: number; staff: number; forecast: number }): Promise<void>;
   investorMeeting(r: { metCash: boolean; metProfit: boolean; cash: number; profit: number; goalCash: number; goalProfit: number; trustDelta: number; trust: number; grave: boolean }): Promise<void>;
   gameOver(kind: 'lost' | 'won'): void;
+  identity(first: boolean): Promise<void>;
   minigame(o: { kind: MinigameKind; title?: string; subtitle?: string; instrument?: InstrumentId; difficulty?: number; portrait?: string; allowSkip?: boolean }): Promise<number>;
 }
 
@@ -99,6 +100,12 @@ export class Game {
   ch1Busy = false;
   ambientTimer = 0;
   dirtyUI = true;
+
+  /** Safe autosave (skipped mid end-of-day so the week is never settled twice). */
+  save() {
+    if (this.inEndDay || this.s.gameOver === 'lost') return;
+    saveGame(this.s);
+  }
 
   constructor(s: GameState, scene: Scene) {
     this.s = s;
@@ -184,7 +191,10 @@ export class Game {
         shared: !p.owned && p.index === this.layout.hall,
       }));
       if (s.chapter === 2) { sign = 'AULAS - SALA 2'; signColor = '#d08a2a'; }
-      else sign = s.plots[this.layout.hall].type === 'reception' ? 'ESCOLA DE MÚSICA' : 'ESCOLA - EM OBRAS';
+      else {
+        sign = (s.schoolName ?? 'Escola de Música').slice(0, 26);
+        if (s.uniform) signColor = s.uniform;
+      }
     }
     return { layout: this.layout, plots, sign, signColor, version: this.modelVersion, building: s.chapter > 1 ? s.building : 1 };
   }
@@ -416,6 +426,7 @@ export class Game {
 
   schoolName() {
     if (this.s.chapter === 1) return `${this.s.playerName} · professor`;
+    if (this.s.chapter === 3 && this.s.schoolName) return this.s.schoolName;
     return this.s.chapter === 3 ? `Escola ${firstName(this.s.playerName)}` : `Sala do ${firstName(this.s.playerName)}`;
   }
 
@@ -684,7 +695,7 @@ export class Game {
       } else {
         const t = this.teacher(l.teacherId);
         let ta = this.teacherAgents.get(l.teacherId);
-        const look = l.sub ? randomLook() : t?.look ?? randomLook();
+        const look = this.uniformed(l.sub ? randomLook() : t?.look ?? randomLook());
         if (!ta || l.sub) {
           ta = this.scene.spawn(look, -12, SIDEWALK_Y, { tag: 'teacher', speed: 60 });
           const path = pathTo(this.layout, l.plot, pos.teacher);
@@ -915,7 +926,7 @@ export class Game {
     const room = s.plots.find((p) => p.owned && p.type === 'classroom');
     const startPlot = room?.index ?? L.hall;
     const f = plotFloor(L, startPlot);
-    this.playerAgent = this.scene.spawn(s.playerLook, f.x + f.w / 2 + 14, f.y + f.h - 16, { tag: 'player', speed: 70 });
+    this.playerAgent = this.scene.spawn(this.uniformed(s.playerLook), f.x + f.w / 2 + 14, f.y + f.h - 16, { tag: 'player', speed: 70 });
     this.playerAgent.data = { plot: startPlot };
     this.playerIdle();
     this.placeStaff();
@@ -930,7 +941,7 @@ export class Game {
     this.s.staff.forEach((st, k) => {
       const spot = sp?.staff[k % (sp.staff.length || 1)];
       if (!spot) return;
-      const a = this.scene.spawn(st.look, spot.x + (k >= 3 ? 8 : 0), spot.y, { tag: 'staff' });
+      const a = this.scene.spawn(this.uniformed(st.look), spot.x + (k >= 3 ? 8 : 0), spot.y, { tag: 'staff' });
       a.dir = 'down';
       this.staffAgents.set(st.id, a);
     });
@@ -1014,8 +1025,12 @@ export class Game {
     return txt;
   }
 
+  /** True while the end-of-day/week reports run (state is mid-transition: don't save). */
+  inEndDay = false;
+
   async endDay() {
     const s = this.s;
+    this.inEndDay = true;
     s.minute = DAY_MINUTES;
     this.pause();
     // leads go home
@@ -1027,12 +1042,13 @@ export class Game {
     this.processWaitlist();
     if (s.day >= 5) {
       await this.endWeek();
-      if (s.gameOver) { this.resume(); return; }
+      if (s.gameOver) { this.inEndDay = false; this.resume(); return; }
       s.day = 0;
       s.week++;
     } else s.day++;
     s.dayIndex++;
     s.minute = 0;
+    this.inEndDay = false;
     saveGame(s);
     await this.storyCheck();
     this.resume();
@@ -1080,7 +1096,7 @@ export class Game {
     const fc = this.forecast();
     await this.ui.weekReport(s.stats, { rent, staff, forecast: fc.profit });
     // investor
-    if (s.chapter === 3 && s.investor) {
+    if (s.chapter === 3 && s.investor && !s.investor.bought) {
       const inv = s.investor;
       const metCash = s.cash >= inv.goalCash;
       const metProfit = fc.profit >= inv.goalProfit;
@@ -1244,6 +1260,99 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ actions
+  // ---------------------------------------------------------------- partner buyout (big goal)
+  /** Price to buy Augusto's stake: grows with the school's profit, but stays reachable. */
+  buyoutPrice() {
+    const h = this.s.history.slice(-4);
+    const avg = h.length ? h.reduce((a, b) => a + Math.max(0, b.profit), 0) / h.length : 0;
+    return Math.round(Math.max(50000, 32000 + avg * 10) / 1000) * 1000;
+  }
+  canBuyout() {
+    const inv = this.s.investor;
+    return !!inv && !inv.bought && inv.week >= 4;
+  }
+  async buyout() {
+    const s = this.s;
+    const inv = s.investor;
+    if (!inv || inv.bought || !this.canBuyout()) return;
+    const price = this.buyoutPrice();
+    if (s.cash < price) { this.ui.toast(`Faltam ${Math.round(price - s.cash).toLocaleString('pt-BR')} reais para comprar a parte do sócio.`, 'bad'); return; }
+    this.pause();
+    const ok = await this.ui.choice('Comprar a parte do Augusto?', `Você paga R$ ${price.toLocaleString('pt-BR')} e a escola passa a ser 100% sua: acabam as metas semanais e as cobranças.`, [{ label: '🤝 Fechar negócio' }, { label: 'Agora não' }], INVESTOR_LOOK);
+    if (ok !== 0) { this.resume(); return; }
+    this.addCash(-price, 'Compra da parte do sócio');
+    inv.bought = true;
+    this.addXP(200);
+    sfx.levelUp();
+    await this.ui.dialog([
+      { who: 'Augusto Ferraz', look: INVESTOR_LOOK, text: `Negócio fechado, ${firstName(s.playerName)}. Foi um prazer. Você provou que sabe tocar uma escola.` },
+      { who: s.playerName, look: s.playerLook, side: 'r', text: 'Agora a escola é 100% minha. Sem metas de sábado… só a minha visão de escola de música.' },
+      { who: 'Dica', text: 'Próximo grande sonho: abrir a Filial (árvore de habilidades → Expansão).' },
+    ]);
+    this.news('🏁 Você comprou a parte do sócio! A escola é 100% sua.', 'good');
+    this.resume();
+    saveGame(s);
+    this.dirtyUI = true;
+  }
+
+  // ---------------------------------------------------------------- teacher pay vs tuition
+  /** What one lesson brings in (weekly share of the monthly fee). */
+  lessonRevenue(kind: 'ind' | 'grp') { return kind === 'ind' ? this.s.prices.ind / 4 : (this.s.prices.grp / 4) * this.groupSize(); }
+  /** What the teacher expects to earn per lesson (market). */
+  askingWage(t: Teacher) { return Math.round(16 + t.skill * 5 + (t.traits.includes('virtuoso') ? 8 : 0)); }
+  /** Chance a teacher accepts an offer per lesson. */
+  acceptChance(t: Teacher, offer: number, current?: number) {
+    const ask = this.askingWage(t);
+    if (current !== undefined && offer >= current) return 1;
+    const r = offer / ask;
+    if (r >= 1) return 1;
+    if (r < 0.7) return 0.03;
+    return Math.max(0.05, Math.min(1, (r - 0.7) / 0.3));
+  }
+  /** Weekly result the school makes with this teacher (tuition of their students − their pay). */
+  teacherEconomics(t: Teacher) {
+    let rev = 0;
+    for (const st of this.s.students) if (st.teacherId === t.id && !st.unpaid) rev += st.fee / 4;
+    for (const c of this.s.contracts) if (c.teacherId === t.id) rev += c.weekly;
+    const slots = this.teacherLoad(t);
+    const pay = t.isPlayer ? 0 : slots * t.wage;
+    return { rev, pay, profit: rev - pay, slots };
+  }
+  /** Apply a negotiation result. Returns true if the teacher accepted. */
+  negotiate(t: Teacher, offer: number, hiring: boolean): boolean {
+    const cur = hiring ? undefined : t.wage;
+    const ok = Math.random() < this.acceptChance(t, offer, cur);
+    if (!ok) {
+      if (!hiring) t.morale = Math.max(0, t.morale - 8);
+      return false;
+    }
+    const ratio = offer / this.askingWage(t);
+    if (hiring) t.morale = Math.max(35, Math.min(100, 72 + (ratio - 1) * 70));
+    else t.morale = Math.max(0, Math.min(100, t.morale + (offer - t.wage) * 3));
+    t.wage = Math.round(offer);
+    if (hiring) this.hireTeacher(t);
+    this.dirtyUI = true;
+    return true;
+  }
+  /** School-wide monthly fee: changing it applies to every student (raises upset some). */
+  applyPrice(kind: 'ind' | 'grp', v: number) {
+    const old = this.s.prices[kind];
+    this.setPrice(kind, v);
+    const nv = this.s.prices[kind];
+    if (nv === old) return;
+    for (const st of this.s.students) if (st.kind === kind) {
+      st.fee = Math.round(st.fee * (nv / old));
+      if (nv > old) st.sat = Math.max(0, st.sat - (nv / old - 1) * 45);
+      else st.sat = Math.min(100, st.sat + (1 - nv / old) * 20);
+    }
+    this.ui.toast(nv > old ? `💲 Mensalidade reajustada para R$ ${nv}. Alguns alunos não gostaram.` : `💲 Mensalidade reduzida para R$ ${nv}. Alunos contentes!`, nv > old ? 'info' : 'good');
+  }
+  /** Agents wear the school uniform once the school is open. */
+  uniformed(look: Look): Look {
+    const u = this.s.chapter === 3 ? this.s.uniform : undefined;
+    return u ? { ...look, shirt: u, accent: '#fff6dc' } : look;
+  }
+
   // ---------------------------------------------------------------- building (prefab rooms on a growing corridor)
   land() { return LAND[this.s.building]; }
 
@@ -1888,7 +1997,13 @@ export class Game {
     this.relayout();
     s.skillPoints += 2;
     s.investor = { trust: 60, week: 1, goalCash: 3000, goalProfit: 100, streak: 0, met: 0 };
+    s.schoolName = s.schoolName ?? `Escola ${firstName(s.playerName)}`;
+    s.uniform = s.uniform ?? '#c24d6a';
     this.refreshCandidates();
+    this.invalidateScene();
+    this.setupWorldAgents();
+    saveGame(s);
+    await this.ui.identity(true);
     this.invalidateScene();
     this.setupWorldAgents();
     saveGame(s);

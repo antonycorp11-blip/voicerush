@@ -147,7 +147,7 @@ export interface GameState {
   stats: WeekStats;
   lastWeek: WeekStats | null;
   history: { week: number; cash: number; profit: number; students: number }[];
-  investor: null | { trust: number; week: number; goalCash: number; goalProfit: number; streak: number; met: number };
+  investor: null | { trust: number; week: number; goalCash: number; goalProfit: number; streak: number; met: number; bought?: boolean };
   ch1: { day: number; tasks: Ch1Task[]; earned: number };
   youtube: { views: number; subs: number; videosThisWeek: number; boostWeeks: number };
   recital: null | { day: number; week: number };
@@ -161,6 +161,8 @@ export interface GameState {
   gameOver: null | 'lost' | 'won';
   totalStudentsEver: number;
   building: 1 | 2;
+  schoolName?: string;
+  uniform?: string;
 }
 
 export interface Ch1Task {

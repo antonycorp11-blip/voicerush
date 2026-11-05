@@ -141,7 +141,13 @@ window.addEventListener('keydown', (e) => {
   if (e.key === '3') game.speed = 4;
   if (e.key === 'Escape') ui?.openPanel(null);
 });
-window.addEventListener('beforeunload', () => { if (game && !game.s.gameOver) saveGame(game.s); });
+// Autosave: phones rarely fire 'beforeunload' when the app is closed, so save
+// every few seconds and whenever the page goes to the background.
+const autosave = () => { if (game) game.save(); };
+setInterval(autosave, 4000);
+window.addEventListener('beforeunload', autosave);
+window.addEventListener('pagehide', autosave);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') autosave(); });
 
 // ------------------------------------------------------------------ start game
 export function goFullscreen() {
