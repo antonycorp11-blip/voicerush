@@ -4,7 +4,7 @@ import { ROOM_TYPES, SKILL_MAP, SKILLS } from '../data/content';
 import type { BranchId } from '../data/content';
 import type { RoomType } from '../data/content';
 import { INVESTOR_LOOK, BOSS_LOOK } from '../game/game';
-import type { PendingEvent, WeekStats } from '../game/state';
+import type { PendingEvent, WeekStats, Teacher } from '../game/state';
 import { DAY_FULL, DAY_NAMES, OPEN_HOUR, firstName, clearSave } from '../game/state';
 import { INSTRUMENTS } from '../data/instruments';
 import type { InstrumentId, MinigameKind } from '../data/instruments';
@@ -92,22 +92,21 @@ export class UI implements UIHooks {
     const time = s.chapter === 1 ? `Dia ${s.ch1.day + 1} · Estúdio Som Maior` : narrow ? `S${s.week} · ${DAY_NAMES[s.day]} · ` + `${String(OPEN_HOUR + Math.floor(s.minute / 60)).padStart(2, '0')}:${String(s.minute % 60).padStart(2, '0')}` : `Semana ${s.week} · ${DAY_FULL[s.day]} · ${String(OPEN_HOUR + Math.floor(s.minute / 60)).padStart(2, '0')}:${String(s.minute % 60).padStart(2, '0')}`;
     const spd = (v: number, l: string) => `<button class="spd ${g.speed === v ? 'on' : ''}" data-act="speed" data-arg="${v}">${l}</button>`;
     const inv = s.investor;
+    const clock = s.chapter === 1 ? `Dia ${s.ch1.day + 1}` : `${narrow ? 'S' + s.week : 'Semana ' + s.week} · ${narrow ? DAY_NAMES[s.day] : DAY_FULL[s.day]} ${String(OPEN_HOUR + Math.floor(s.minute / 60)).padStart(2, '0')}:${String(s.minute % 60).padStart(2, '0')}`;
+    void time;
     morph(this.hudEl, `
-      <div class="card hud-lvl">
-        <div class="hud-school">${g.schoolName()}</div>
-        <div class="row"><span class="px lvl">LVL ${s.level}</span><span class="px xp">${Math.floor(s.xp)} / ${need} XP</span></div>
-        <div class="xpbar"><div style="width:${pct}%"></div></div>
-      </div>
-      <div class="card hud-time">
-        <div class="px time">${time}</div>
-        ${s.chapter >= 2 ? `<div class="row gap4">${spd(0, '⏸')}${spd(1, '▶')}${spd(2, '▶▶')}${spd(4, '▶▶▶')}</div>` : ''}
-      </div>
-      <div class="hud-right">
-        <div class="card stat" title="Dinheiro em caixa"><span>💰</span><b class="px ${s.cash < 0 ? 'red' : ''}">${money(s.cash)}</b></div>
-        ${fc ? `<div class="card stat" title="Previsão de lucro semanal"><span>📈</span><b class="px ${fc.profit < 0 ? 'red' : 'green'}">${fc.profit >= 0 ? '+' : ''}${money(fc.profit)}<small>/sem</small></b></div>` : ''}
-        ${s.chapter >= 2 ? `<div class="card stat students" title="Alunos"><span>🎓</span><b class="px">${s.students.length}</b></div>` : ''}
-        ${inv ? `<div class="card stat trust" title="Confiança do investidor"><span>🤝</span><div class="tbar"><div style="width:${inv.trust}%" class="${inv.trust < 30 ? 'low' : ''}"></div></div><b class="px">${Math.round(inv.trust)}%</b></div>` : ''}
-        <div class="card stat icons"><button class="ico" data-act="music" title="Música">${isMusicOn() ? '🎵' : '🔇'}</button><button class="ico" data-act="sfx" title="Efeitos">${isSfxOn() ? '🔊' : '🔈'}</button><button class="ico" data-act="fullscreen" title="Tela cheia">⛶</button><button class="ico" data-act="menu" title="Menu">☰</button></div>
+      <div class="topbar">
+        <div class="tbs lvlbox" title="${g.schoolName()}">
+          <span class="px lvl">LVL ${s.level}</span>
+          <div class="xpbar"><div style="width:${pct}%"></div></div>
+        </div>
+        <div class="tbs" title="Dinheiro em caixa"><span class="tbi">💰</span><b class="px ${s.cash < 0 ? 'red' : 'gold'}">${money(s.cash)}</b></div>
+        ${fc ? `<div class="tbs" title="Previsão de lucro por semana"><span class="tbi">📈</span><b class="px ${fc.profit < 0 ? 'red' : 'green'}">${fc.profit >= 0 ? '+' : ''}${money(fc.profit)}</b><small>/sem</small></div>` : ''}
+        ${s.chapter >= 2 && !narrow ? `<div class="tbs" title="Alunos"><span class="tbi">🎓</span><b class="px">${s.students.length}</b></div>` : ''}
+        ${inv && !inv.bought ? `<div class="tbs" title="Confiança do investidor"><span class="tbi">🤝</span><b class="px ${inv.trust < 30 ? 'red' : ''}">${Math.round(inv.trust)}%</b></div>` : ''}
+        <div class="tbs grow"></div>
+        <div class="tbs clock"><span class="px">${clock}</span>${s.chapter >= 2 ? `<span class="spds">${spd(0, '⏸')}${spd(1, '▶')}${spd(2, '▶▶')}${spd(4, '▶▶▶')}</span>` : ''}</div>
+        <div class="tbs icons"><button class="ico" data-act="fullscreen" title="Tela cheia">⛶</button><button class="ico" data-act="menu" title="Menu">☰</button></div>
       </div>`);
   }
 
@@ -131,6 +130,9 @@ export class UI implements UIHooks {
       h = `<div class="obj-h"><img class="pix mini-face" src="${portraitURL(INVESTOR_LOOK)}"><b>Meta da semana ${inv.week}</b><small>revisão sábado 20h</small></div>
         <div class="goal ${s.cash >= inv.goalCash ? 'ok' : 'no'}"><span>${s.cash >= inv.goalCash ? '✅' : '❌'} Caixa ≥ ${money(inv.goalCash)}</span><b>${money(s.cash)}</b></div>
         <div class="goal ${fc.profit >= inv.goalProfit ? 'ok' : 'no'}"><span>${fc.profit >= inv.goalProfit ? '✅' : '❌'} Lucro previsto ≥ ${money(inv.goalProfit)}</span><b>${money(fc.profit)}</b></div>`;
+      const price = g.buyoutPrice();
+      if (inv.bought) h = `<div class="obj-h"><b>🏁 A escola é 100% sua!</b><small>próximo sonho: abrir a Filial</small></div>`;
+      else h += `<div class="goal big-goal"><span>🏁 Comprar a parte do sócio</span><b>${money(Math.max(0, s.cash))} / ${money(price)}</b></div><div class="bar"><div style="width:${Math.min(100, (Math.max(0, s.cash) / price) * 100)}%"></div></div>${s.cash >= price && g.canBuyout() ? '<button class="btn small primary" data-act="buyout">🤝 Comprar agora</button>' : ''}`;
     }
     if (s.chapter >= 2) {
       const waiting = g.leads.filter((l) => l.agent?.clickable && !l.busy).length;
@@ -195,7 +197,8 @@ export class UI implements UIHooks {
 
   schoolOverview(): string {
     const g = this.g;
-    let h = '<div class="ptitle">🏫 Sua escola</div><p class="muted small">Toque num espaço do mapa (ou aqui) para gerenciar. Tudo vem pré-montado.</p>';
+    let h = `<div class="ptitle">🏫 ${g.schoolName()}</div><p class="muted small">Toque num espaço do mapa (ou aqui) para gerenciar. Tudo vem pré-montado.</p>`;
+    if (g.s.chapter === 3) h += '<button class="btn wide" data-act="identity">🎨 Nome, uniforme e mensalidade</button>';
     for (const p of g.s.plots) {
       if (!p.owned && p.index !== g.layout.hall) continue;
       h += `<button class="room-row" data-act="room" data-arg="${p.index}"><b>${roomName(g, p)}</b><small>${p.owned ? `Nível ${p.decor + 1} · ${['Abandonado', 'Pintado', 'Aconchegante', 'Premium', 'Luxo'][p.decor]}` + (p.type === 'classroom' ? ' · ' + Object.keys(p.equip).map((i) => INSTRUMENTS[i as InstrumentId].emoji).join(' ') : '') : 'Compartilhado'}</small></button>`;
@@ -293,7 +296,10 @@ export class UI implements UIHooks {
       case 'decor': g.upgradeDecor(Number(arg)); this.renderPanel(); break;
       case 'equip': { const [i, inst, t] = arg.split(':'); g.buyEquip(Number(i), inst as InstrumentId, Number(t)); this.renderPanel(); break; }
       case 'unequip': { const [i, inst] = arg.split(':'); g.removeEquip(Number(i), inst as InstrumentId); this.renderPanel(); break; }
-      case 'hire': { const t = g.s.candidates.find((c) => c.id === Number(arg)); if (t) g.hireTeacher(t); this.renderPanel(); break; }
+      case 'hire': { const t = g.s.candidates.find((c) => c.id === Number(arg)); if (t) this.negotiateModal(t, true); break; }
+      case 'salary': { const t = g.s.teachers.find((c) => c.id === Number(arg)); if (t) this.negotiateModal(t, false); break; }
+      case 'identity': this.identity(false); break;
+      case 'buyout': g.buyout(); break;
       case 'fire': {
         const t = g.s.teachers.find((c) => c.id === Number(arg));
         if (!t) break;
@@ -331,8 +337,9 @@ export class UI implements UIHooks {
     if (!k) return;
     const g = this.g;
     const v = Number(el.value);
-    if (k === 'price-ind') g.setPrice('ind', v);
-    else if (k === 'price-grp') g.setPrice('grp', v);
+    if (k === 'price-ind' || k === 'price-grp') {
+      if (commit) { g.applyPrice(k === 'price-ind' ? 'ind' : 'grp', v); this.renderPanel(); return; }
+    }
     else if (k === 'price-rehearsal') g.setPrice('rehearsal', v);
     else if (k === 'player-hours') { if (commit) { g.setPlayerHours(v); this.renderPanel(); } return; }
     else return;
@@ -567,8 +574,8 @@ export class UI implements UIHooks {
     ov.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => {
       const res = g.resolveEvent(ev, Number((b as HTMLElement).dataset.k));
       const m = ov.querySelector('.modal')!;
-      m.innerHTML = `<div class="ev-big">${def.emoji}</div><div class="m-title">Resultado</div><p>${res}</p><button class="btn primary ok">OK</button>`;
-      (m.querySelector('.ok') as HTMLElement).onclick = () => { this.closeModal(ov); g.resume(); this.refresh(); };
+      m.innerHTML = `<div class="ev-big">${def.emoji}</div><div class="m-title">Resultado</div><p>${res}</p><button class="btn primary btn-confirm">OK</button>`;
+      (m.querySelector('.btn-confirm') as HTMLElement).onclick = () => { this.closeModal(ov); g.resume(); this.refresh(); };
     }));
     (ov.querySelector('.later') as HTMLElement).onclick = () => { this.closeModal(ov); g.resume(); this.refresh(); };
   }
@@ -583,6 +590,121 @@ export class UI implements UIHooks {
       this.closeModal(ov); g.resume(); this.refresh();
     }));
     (ov.querySelector('.later') as HTMLElement).onclick = () => { this.closeModal(ov); g.resume(); };
+  }
+
+  // ------------------------------------------------------------ school identity (name / uniform / fee)
+  identity(first: boolean): Promise<void> {
+    return new Promise((resolve) => {
+      const g = this.g;
+      const s = g.s;
+      g.pause();
+      const colors = ['#c24d6a', '#e05a4a', '#f08a3e', '#d8a63a', '#3f9a52', '#3fb7b0', '#4f8fd8', '#7a5ac8', '#2e2433'];
+      let name = s.schoolName ?? `Escola ${firstName(s.playerName)}`;
+      let color = s.uniform ?? colors[0];
+      let ind = s.prices.ind;
+      const ov = this.modal('', 'wide identity');
+      const render = () => {
+        const fair = g.fairPrice('ind');
+        morph(ov.querySelector('.modal')!, `
+          <div class="m-kicker">${first ? 'Inauguração' : 'Identidade da escola'}</div>
+          <div class="m-title">${first ? '🏫 Como vai ser a sua escola?' : '🎨 Identidade da escola'}</div>
+          <div class="id-grid">
+            <div>
+              <label class="id-lbl">Nome (vai na placa)</label>
+              <input class="inp id-name" maxlength="26" value="${name.replace(/"/g, '')}">
+              <label class="id-lbl">Cor do uniforme e da placa</label>
+              <div class="id-colors">${colors.map((c) => `<button class="id-c ${c === color ? 'on' : ''}" data-c="${c}" style="--c:${c}"></button>`).join('')}</div>
+              <label class="id-lbl">Mensalidade (aula individual)</label>
+              <div class="price-row"><span class="small muted">Preço justo hoje ≈ ${money(fair)}. Vale para todos os alunos.</span><b class="big">${money(ind)}</b></div>
+              <input type="range" min="120" max="800" step="10" value="${ind}" class="wide id-price">
+              <div class="small muted">Cada aula individual rende <b>${money(ind / 4)}</b> (mensalidade ÷ 4 aulas). O salário de cada professor você negocia em 👥 Equipe.</div>
+            </div>
+            <div class="id-preview">
+              <div class="id-sign" style="--c:${color}">${name.toUpperCase() || 'ESCOLA'}</div>
+              <img class="pix id-uni" src="${portraitURL({ ...s.playerLook, shirt: color, accent: '#fff6dc' })}">
+              <div class="small muted">Professores e equipe usam o uniforme.</div>
+            </div>
+          </div>
+          <button class="btn primary big btn-confirm">${first ? 'Abrir a escola! 🎉' : 'Salvar'}</button>`);
+      };
+      render();
+      ov.addEventListener('input', (e) => {
+        const t = e.target as HTMLInputElement;
+        if (t.classList.contains('id-name')) { name = t.value; (ov.querySelector('.id-sign') as HTMLElement).textContent = name.toUpperCase() || 'ESCOLA'; }
+        if (t.classList.contains('id-price')) { ind = Number(t.value); render(); }
+      });
+      ov.addEventListener('click', (e) => {
+        const t = e.target as HTMLElement;
+        const c = t.closest('[data-c]') as HTMLElement | null;
+        if (c) { color = c.dataset.c!; sfx.click(); render(); return; }
+        if (t.closest('.btn-confirm')) {
+          s.schoolName = (name.trim() || `Escola ${firstName(s.playerName)}`).slice(0, 26);
+          s.uniform = color;
+          if (ind !== s.prices.ind) { if (s.students.length) g.applyPrice('ind', ind); else g.setPrice('ind', ind); }
+          sfx.good();
+          this.closeModal(ov);
+          g.resume();
+          g.invalidateScene();
+          if (!first) g.setupWorldAgents();
+          this.refresh();
+          resolve();
+        }
+      });
+    });
+  }
+
+  // ------------------------------------------------------------ salary negotiation
+  negotiateModal(t: Teacher, hiring: boolean) {
+    const g = this.g;
+    const s = g.s;
+    g.pause();
+    const ask = g.askingWage(t);
+    let offer = hiring ? ask : t.wage;
+    const ov = this.modal('', 'wide');
+    let msg = '';
+    const render = () => {
+      const revI = g.lessonRevenue('ind');
+      const revG = g.has('turmas') ? g.lessonRevenue('grp') : 0;
+      const ch = g.acceptChance(t, offer, hiring ? undefined : t.wage);
+      morph(ov.querySelector('.modal')!, `
+        <div class="ev-head"><img class="modal-face pix" src="${portraitURL(t.look)}"><div><div class="m-kicker">${hiring ? 'Contratação' : 'Renegociar salário'}</div><div class="m-title">${t.name}</div>
+          <div class="small">${t.instruments.map((i) => INSTRUMENTS[i].emoji + ' ' + INSTRUMENTS[i].name).join(' · ')} · ${'★'.repeat(t.skill)}</div></div></div>
+        <div class="neg-box">
+          <div class="kv"><span>Ele(a) pede</span><b>${money(ask)} por aula</b></div>
+          ${!hiring ? `<div class="kv"><span>Recebe hoje</span><b>${money(t.wage)} por aula</b></div>` : ''}
+          <div class="price-row"><b>Sua proposta</b><b class="big">${money(offer)}</b></div>
+          <input type="range" class="wide neg-range" min="${Math.round(ask * 0.5)}" max="${Math.round(ask * 1.6)}" step="1" value="${offer}">
+          <div class="neg-calc">
+            <div><small>Aula individual rende</small><b>${money(revI)}</b><small>você fica com</small><b class="${revI - offer >= 0 ? 'green' : 'red'}">${money(revI - offer)}</b></div>
+            ${revG ? `<div><small>Turma cheia (${g.groupSize()}) rende</small><b>${money(revG)}</b><small>você fica com</small><b class="${revG - offer >= 0 ? 'green' : 'red'}">${money(revG - offer)}</b></div>` : ''}
+            <div><small>Com agenda cheia (${t.hours}h)</small><b class="${(revI - offer) * t.hours >= 0 ? 'green' : 'red'}">${money((revI - offer) * t.hours)}/sem</b><small>de lucro (individual)</small></div>
+          </div>
+          <div class="neg-chance ${ch >= 0.8 ? 'hi' : ch >= 0.4 ? 'mid' : 'lo'}">Chance de aceitar: <b>${Math.round(ch * 100)}%</b></div>
+          ${msg ? `<div class="alert">${msg}</div>` : ''}
+        </div>
+        <div class="row gap"><button class="btn primary btn-confirm">${hiring ? 'Fazer proposta' : 'Propor novo salário'}</button><button class="btn ghost neg-cancel">Cancelar</button></div>`);
+    };
+    render();
+    const close = () => { this.closeModal(ov); g.resume(); this.refresh(); };
+    ov.addEventListener('input', (e) => { const r = e.target as HTMLInputElement; if (r.classList.contains('neg-range')) { offer = Number(r.value); msg = ''; render(); } });
+    ov.addEventListener('click', (e) => {
+      const tg = e.target as HTMLElement;
+      if (tg.closest('.neg-cancel')) { close(); return; }
+      if (!tg.closest('.btn-confirm')) return;
+      if (hiring && !s.candidates.includes(t)) { close(); return; }
+      if (g.negotiate(t, offer, hiring)) {
+        sfx.good();
+        this.toast(`🤝 ${firstName(t.name)} aceitou ${money(offer)} por aula!`, 'good');
+        close();
+      } else {
+        sfx.bad();
+        if (hiring && offer / ask < 0.75) {
+          s.candidates = s.candidates.filter((c) => c !== t);
+          this.toast(`😤 ${firstName(t.name)} achou a proposta baixa e foi embora.`, 'bad');
+          close();
+        } else { msg = `${firstName(t.name)} recusou. Tente um valor um pouco maior.`; render(); }
+      }
+    });
   }
 
   // ------------------------------------------------------------ reports
@@ -610,8 +732,8 @@ export class UI implements UIHooks {
         <div class="kv total"><span>📈 Lucro previsto p/ próxima semana</span><b class="${extra.forecast >= 0 ? 'green' : 'red'}">${money(extra.forecast)}</b></div>
         ${st.lostCap >= 3 ? '<div class="alert">⚠️ Você perdeu alunos por falta de vaga. Veja 📊 Demanda: contrate professores ou equipe salas.</div>' : ''}
         ${(st.noise ?? 0) >= 3 ? '<div class="alert">🔊 Muitas aulas atrapalhadas por som vindo da sala ao lado. Troque as paredes por isolamento.</div>' : ''}
-        <button class="btn primary big ok">Continuar</button>`, 'report');
-      (ov.querySelector('.ok') as HTMLElement).onclick = () => { this.closeModal(ov); resolve(); };
+        <button class="btn primary big btn-confirm">Continuar</button>`, 'report');
+      (ov.querySelector('.btn-confirm') as HTMLElement).onclick = () => { this.closeModal(ov); resolve(); };
     });
   }
 
@@ -630,9 +752,9 @@ export class UI implements UIHooks {
         <div class="kv"><span>Confiança</span><b class="${r.trustDelta >= 0 ? 'green' : 'red'}">${r.trustDelta >= 0 ? '+' : ''}${r.trustDelta} → ${Math.round(r.trust)}%</b></div>
         <div class="tbar big"><div style="width:${r.trust}%" class="${r.trust < 30 ? 'low' : ''}"></div></div>
         ${r.trust < 30 && r.trust > 0 ? '<div class="alert">⚠️ A confiança está perigosamente baixa!</div>' : ''}
-        <button class="btn primary big ok">${r.trust > 0 ? 'Próxima semana' : '...'}</button>`, 'report');
+        <button class="btn primary big btn-confirm">${r.trust > 0 ? 'Próxima semana' : '...'}</button>`, 'report');
       if (both) sfx.good(); else sfx.bad();
-      (ov.querySelector('.ok') as HTMLElement).onclick = () => { this.closeModal(ov); resolve(); };
+      (ov.querySelector('.btn-confirm') as HTMLElement).onclick = () => { this.closeModal(ov); resolve(); };
     });
   }
 

@@ -132,14 +132,14 @@ export function teacherCard(g: Game, t: Teacher, mode: 'team' | 'hire'): string 
   const traits = t.traits.map((tr) => `<span class="trait ${TRAITS[tr].good ? 'good' : 'bad'}" title="${TRAITS[tr].desc}">${TRAITS[tr].name}</span>`).join('');
   const mood = t.morale >= 70 ? '😄' : t.morale >= 45 ? '🙂' : t.morale >= 25 ? '😕' : '😠';
   let actions = '';
-  if (mode === 'hire') actions = `<button class="btn primary small wide" data-act="hire" data-arg="${t.id}">Contratar</button>`;
+  if (mode === 'hire') actions = `<button class="btn primary small wide" data-act="hire" data-arg="${t.id}">💬 Negociar e contratar</button>`;
   else if (t.isPlayer) {
     actions = `<div class="small muted">Suas horas de aula por semana: <b>${t.hours}h</b></div>
       <input type="range" min="0" max="30" step="2" value="${t.hours}" data-input="player-hours" class="wide">`;
   } else {
     actions = `<div class="row gap">
       ${t.skill < 5 ? `<button class="btn small accent" data-act="train" data-arg="${t.id}" title="Curso de especialização">🎓 ${money(600 + t.skill * 400)}</button>` : ''}
-      <button class="btn small" data-act="raise" data-arg="${t.id}" title="Aumento de R$3/aula">💸 +3</button>
+      <button class="btn small" data-act="salary" data-arg="${t.id}" title="Negociar salário por aula">💬 Salário</button>
       <button class="btn small ghost" data-act="fire" data-arg="${t.id}">Demitir</button></div>`;
   }
   return `<div class="tcard ${t.isPlayer ? 'me' : ''}" style="--tc:${main.color}">
@@ -152,14 +152,23 @@ export function teacherCard(g: Game, t: Teacher, mode: 'team' | 'hire'): string 
     <div class="tc-name">${t.name}</div>
     <div class="tc-insts">${t.instruments.map((i) => `<span title="${INSTRUMENTS[i].name}" style="--ic:${INSTRUMENTS[i].color}" class="tc-i">${INSTRUMENTS[i].emoji}<b>${INSTRUMENTS[i].name}</b></span>`).join('')}</div>
     <div class="tc-stats">
-      <div><small>Custo</small><b>${t.isPlayer ? '—' : money(t.wage) + '/aula'}</b></div>
+      <div><small>${mode === 'hire' ? 'Pede' : 'Salário'}</small><b>${t.isPlayer ? '—' : money(mode === 'hire' ? g.askingWage(t) : t.wage) + '/aula'}</b></div>
       <div><small>Agenda</small><b>${mode === 'team' ? `${load}/${t.hours}h` : `${t.hours}h/sem`}</b></div>
       <div><small>Moral</small><b>${mood} ${Math.round(t.morale)}</b></div>
     </div>
     ${mode === 'team' ? bar((load / Math.max(1, t.hours)) * 100, load >= t.hours ? 'red' : '') : ''}
+    ${econLine(g, t, mode)}
     <div class="tc-traits">${traits || '<span class="muted small">Sem traços marcantes</span>'}</div>
     <div class="tc-act">${actions}</div>
   </div>`;
+}
+
+function econLine(g: Game, t: Teacher, mode: 'team' | 'hire'): string {
+  const per = g.lessonRevenue('ind') - (t.isPlayer ? 0 : mode === 'hire' ? g.askingWage(t) : t.wage);
+  if (mode === 'hire') return `<div class="econ"><span>Por aula individual você ficaria com</span><b class="${per >= 0 ? 'green' : 'red'}">${money(per)}</b></div>`;
+  const e = g.teacherEconomics(t);
+  return `<div class="econ"><span>Por aula: rende ${money(g.lessonRevenue('ind'))} − paga ${money(t.isPlayer ? 0 : t.wage)}</span><b class="${per >= 0 ? 'green' : 'red'}">${money(per)}</b></div>
+    <div class="econ"><span>Na semana (${e.slots} aulas): você ganha</span><b class="${e.profit >= 0 ? 'green' : 'red'}">${money(e.profit)}</b></div>`;
 }
 
 function staffCard(g: Game, st: Staff, mode: 'team' | 'hire'): string {
@@ -244,7 +253,7 @@ export function demandPanel(g: Game): string {
     h += `<div class="price-row"><div><b>Turma (até ${g.groupSize()} alunos)</b><div class="small muted">Preço justo ≈ ${money(fairG)} · conversão ~${Math.round(cg * 100)}%</div></div><b class="big">${money(s.prices.grp)}</b></div>
       <input type="range" min="60" max="500" step="10" value="${s.prices.grp}" data-input="price-grp" class="wide">`;
   } else h += '<p class="muted small">🔒 Desbloqueie <b>Aulas em Grupo</b> (Pedagogia) para vender turmas: ticket menor, volume maior.</p>';
-  h += `<p class="small muted">Preço alto = menos matrículas, mas cada aluno rende mais — e espera aulas melhores. Preço baixo = volume. Novos preços valem para novas matrículas.</p>`;
+  h += `<p class="small muted">A mensalidade é única para a escola e vale para <b>todos</b> os alunos (aumentar incomoda quem já estuda). Preço alto = menos matrículas e alunos mais exigentes; preço baixo = volume. O salário de cada professor você negocia em 👥 Equipe.</p>`;
 
   // students list
   const avg = s.students.length ? s.students.reduce((a, b) => a + b.sat, 0) / s.students.length : 0;
@@ -307,6 +316,22 @@ export function financePanel(g: Game): string {
       <div class="kv"><span>${fc.profit >= inv.goalProfit ? '✅' : '❌'} Lucro previsto ≥ ${money(inv.goalProfit)}</span><b>${money(fc.profit)}</b></div>
       <div class="small muted">Revisão todo sábado às 20h. Se a confiança zerar, ele retira o investimento (fim de jogo).</div></div></div>`;
   }
+  if (s.investor) {
+    const inv = s.investor;
+    if (inv.bought) h += '<div class="inv-card buy"><div><b>🏁 A escola é 100% sua!</b><div class="small muted">Você comprou a parte do Augusto. Sem metas semanais.</div></div></div>';
+    else {
+      const price = g.buyoutPrice();
+      const pct = Math.min(100, (Math.max(0, s.cash) / price) * 100);
+      h += `<div class="inv-card buy"><div style="flex:1"><b>🏁 Grande meta: comprar a parte do sócio</b>
+        <div class="small muted">Pague ${money(price)} e a escola fica 100% sua: acabam as metas e cobranças de sábado. O preço sobe conforme o lucro da escola.</div>
+        <div class="kv"><span>Seu caixa</span><b>${money(s.cash)} / ${money(price)}</b></div>${bar(pct, pct >= 100 ? 'green' : '')}
+        ${g.canBuyout() ? `<button class="btn ${s.cash >= price ? 'primary' : ''} wide" data-act="buyout" ${s.cash >= price ? '' : 'disabled'}>🤝 Comprar a parte do Augusto</button>` : '<div class="small muted">Disponível a partir da semana 4 da sociedade.</div>'}</div></div>`;
+    }
+  }
+  h += `<div class="sect">💲 Mensalidade da escola</div>
+    <div class="kv"><span>Aula individual</span><b>${money(s.prices.ind)}/mês · rende ${money(s.prices.ind / 4)} por aula</b></div>
+    ${g.has('turmas') ? `<div class="kv"><span>Turma</span><b>${money(s.prices.grp)}/mês por aluno</b></div>` : ''}
+    <div class="small muted">Altere em 📊 Demanda ou em 🏫 Escola → Nome, uniforme e mensalidade.</div>`;
   const P = fc.parts;
   h += `<div class="sect">📈 Previsão semanal (com a agenda atual)</div>
     <div class="kv"><span>Mensalidades</span><b class="green">${money(P.tuition)}</b></div>

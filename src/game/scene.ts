@@ -112,6 +112,7 @@ export class Scene {
   focusKey = '';
   ghosts: { id: number; side: 'top' | 'bottom'; col: number; w: number; h: number; label: string }[] = [];
   railX = 0;
+  minScale = 1;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -136,7 +137,10 @@ export class Scene {
     const rail = h <= 520 ? 68 * dpr : 0;
     this.railX = -rail / 2;
     const fit = Math.min((this.canvas.width - rail) / this.viewW, this.canvas.height / this.viewH);
-    this.scale = Math.max(1, Math.floor(fit * 2) / 2) + this.zoom;
+    // never smaller than "cover": the world always fills the whole screen (no empty borders)
+    const cover = Math.max(this.canvas.width / WORLD_W, this.canvas.height / WORLD_H);
+    this.minScale = cover;
+    this.scale = Math.max(cover, Math.max(1, Math.floor(fit * 2) / 2) + this.zoom);
     this.g.imageSmoothingEnabled = false;
   }
 
@@ -149,8 +153,8 @@ export class Scene {
       bx0 = Math.min(bx0, r.col * CELL); bx1 = Math.max(bx1, (r.col + r.w) * CELL);
     }
     const bottom = ROAD_Y + 20;
-    this.viewW = Math.max(560, bx1 - bx0 + 96);
-    this.viewH = Math.max(330, bottom - top);
+    this.viewW = Math.max(380, bx1 - bx0 + 80);
+    this.viewH = Math.max(270, bottom - top);
     this.camX = (bx0 + bx1) / 2;
     this.camY = (top + bottom) / 2;
     this.panX = this.panY = 0;
@@ -841,9 +845,14 @@ export class Scene {
     sg.fillRect(0, 0, cw, ch);
     const s = this.scale;
     const ww = WORLD_W * s, wh = WORLD_H * s;
-    this.ox = Math.round(cw / 2 - this.camX * s + this.panX + this.railX);
-    this.oy = Math.round(ch / 2 - this.camY * s + this.panY);
-    this.clampPan();
+    let ox = cw / 2 - this.camX * s + this.panX + this.railX;
+    let oy = ch / 2 - this.camY * s + this.panY;
+    // keep the world covering the screen: clamp the camera instead of showing outside
+    const cox = Math.min(0, Math.max(cw - WORLD_W * s, ox));
+    const coy = Math.min(0, Math.max(ch - WORLD_H * s, oy));
+    this.panX += cox - ox; this.panY += coy - oy;
+    this.ox = Math.round(cox);
+    this.oy = Math.round(coy);
     sg.imageSmoothingEnabled = false;
     sg.drawImage(this.world, 0, 0, WORLD_W, WORLD_H, this.ox, this.oy, ww, wh);
 
