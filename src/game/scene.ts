@@ -127,7 +127,7 @@ export class Scene {
   }
 
   resize() {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.dpr = dpr;
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
@@ -1020,7 +1020,7 @@ export class Scene {
     let best: Agent | null = null;
     for (const a of this.agents) {
       if (!a.clickable || a.hidden) continue;
-      const pad = TOUCH ? 6 : 0;
+      const pad = TOUCH ? 12 : 3;
       if (pt.x >= a.x - 9 - pad && pt.x <= a.x + 9 + pad && pt.y >= a.y - 40 - pad && pt.y <= a.y + 2 + pad) {
         if (!best || a.y > best.y) best = a;
       }

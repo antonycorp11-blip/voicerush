@@ -108,7 +108,8 @@ window.addEventListener('pointermove', (e) => {
   }
   if (down && down.id === e.pointerId) {
     const dx = e.clientX - down.x, dy = e.clientY - down.y;
-    if (Math.hypot(dx, dy) > 6) down.moved = true;
+    // fingers wobble: only treat as a drag after a clear movement
+    if (Math.hypot(dx, dy) > (e.pointerType === 'mouse' ? 6 : 14)) down.moved = true;
     if (down.moved) { scene.panX = down.px + dx * scene.dpr; scene.panY = down.py + dy * scene.dpr; }
     return;
   }
