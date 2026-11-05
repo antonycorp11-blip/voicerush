@@ -58,3 +58,8 @@ Espaço pausa, teclas 1/2/3 mudam a velocidade.
 - `src/audio.ts` — sintetizador WebAudio (notas, bateria, trilha lo-fi)
 
 Toda a arte e o áudio são gerados por código: não há arquivos de imagem ou som externos.
+
+## Deploy (Cloudflare Workers)
+
+O `wrangler.jsonc` publica a pasta `dist/` como site estático no worker `musicash`.
+O build usa `npm run build` e o deploy `npx wrangler deploy`.
