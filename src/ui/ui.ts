@@ -1,6 +1,7 @@
 // UI layer: HUD, toolbar, side panels, modals, dialogs.
 import type { Game, Lead, DialogLine, UIHooks, BuildSpot } from '../game/game';
-import { ROOM_TYPES, SKILL_MAP } from '../data/content';
+import { ROOM_TYPES, SKILL_MAP, SKILLS } from '../data/content';
+import type { BranchId } from '../data/content';
 import type { RoomType } from '../data/content';
 import { INVESTOR_LOOK, BOSS_LOOK } from '../game/game';
 import type { PendingEvent, WeekStats } from '../game/state';
@@ -13,7 +14,8 @@ import { EVENT_DEFS } from '../game/events';
 import { runMinigame } from '../minigames/shell';
 import { sfx, setMusic, setSfx, isMusicOn, isSfxOn } from '../audio';
 import { money, roomPanel, teamPanel, demandPanel, marketingPanel, financePanel, eventsPanel, meetingChoices, roomName } from './panels';
-import { skillTreeSVG, skillDetail } from './skilltree';
+import { skillTreeHTML } from './skilltree';
+import { morph } from './morph';
 
 type PanelId = 'room' | 'team' | 'demand' | 'marketing' | 'finance' | 'events' | null;
 
@@ -31,7 +33,6 @@ export class UI implements UIHooks {
   barEl: HTMLElement;
   lastPanelRender = 0;
   pointerInPanel = false;
-  skillSel: string | null = null;
   skillOpen = false;
   modalDepth = 0;
   objCollapsed = window.innerHeight <= 520;
@@ -66,10 +67,10 @@ export class UI implements UIHooks {
     const evN = g.s.events.length;
     const sp = g.s.skillPoints;
     if (ch === 1) {
-      this.barEl.innerHTML = btn('skills', '🎼', 'Habilidades', sp ? `<b class="badge">${sp}</b>` : '');
+      morph(this.barEl, btn('skills', '🎼', 'Habilidades', sp ? `<b class="badge">${sp}</b>` : ''));
       return;
     }
-    this.barEl.innerHTML = [
+    morph(this.barEl, [
       btn('school', '🏫', 'Escola'),
       btn('team', '👥', 'Equipe'),
       btn('demand', '📊', 'Demanda'),
@@ -77,7 +78,7 @@ export class UI implements UIHooks {
       btn('finance', '💰', 'Finanças'),
       btn('skills', '🎼', 'Habilidades', sp ? `<b class="badge">${sp}</b>` : ''),
       btn('events', '❗', 'Situações', evN ? `<b class="badge red">${evN}</b>` : ''),
-    ].join('');
+    ].join(''));
   }
 
   renderHUD() {
@@ -91,7 +92,7 @@ export class UI implements UIHooks {
     const time = s.chapter === 1 ? `Dia ${s.ch1.day + 1} · Estúdio Som Maior` : narrow ? `S${s.week} · ${DAY_NAMES[s.day]} · ` + `${String(OPEN_HOUR + Math.floor(s.minute / 60)).padStart(2, '0')}:${String(s.minute % 60).padStart(2, '0')}` : `Semana ${s.week} · ${DAY_FULL[s.day]} · ${String(OPEN_HOUR + Math.floor(s.minute / 60)).padStart(2, '0')}:${String(s.minute % 60).padStart(2, '0')}`;
     const spd = (v: number, l: string) => `<button class="spd ${g.speed === v ? 'on' : ''}" data-act="speed" data-arg="${v}">${l}</button>`;
     const inv = s.investor;
-    this.hudEl.innerHTML = `
+    morph(this.hudEl, `
       <div class="card hud-lvl">
         <div class="hud-school">${g.schoolName()}</div>
         <div class="row"><span class="px lvl">LVL ${s.level}</span><span class="px xp">${Math.floor(s.xp)} / ${need} XP</span></div>
@@ -107,7 +108,7 @@ export class UI implements UIHooks {
         ${s.chapter >= 2 ? `<div class="card stat students" title="Alunos"><span>🎓</span><b class="px">${s.students.length}</b></div>` : ''}
         ${inv ? `<div class="card stat trust" title="Confiança do investidor"><span>🤝</span><div class="tbar"><div style="width:${inv.trust}%" class="${inv.trust < 30 ? 'low' : ''}"></div></div><b class="px">${Math.round(inv.trust)}%</b></div>` : ''}
         <div class="card stat icons"><button class="ico" data-act="music" title="Música">${isMusicOn() ? '🎵' : '🔇'}</button><button class="ico" data-act="sfx" title="Efeitos">${isSfxOn() ? '🔊' : '🔈'}</button><button class="ico" data-act="fullscreen" title="Tela cheia">⛶</button><button class="ico" data-act="menu" title="Menu">☰</button></div>
-      </div>`;
+      </div>`);
   }
 
   renderObjective() {
@@ -146,7 +147,7 @@ export class UI implements UIHooks {
     const body = this.objCollapsed ? `<div class="obj-mini">${mini}</div>${extras}` : h;
     const out = `<button class="obj-tog" data-act="objToggle">${this.objCollapsed ? '▸' : '▾'}</button>${body}`;
     this.objEl.classList.toggle('collapsed', this.objCollapsed);
-    if (out !== this.objEl.dataset.h) { this.objEl.innerHTML = out; this.objEl.dataset.h = out; }
+    morph(this.objEl, out);
   }
 
   tick(now: number) {
@@ -188,9 +189,7 @@ export class UI implements UIHooks {
       case 'events': h = eventsPanel(g); break;
       default: return;
     }
-    const st = body.scrollTop;
-    body.innerHTML = h;
-    body.scrollTop = st;
+    morph(body, h);
     this.lastPanelRender = performance.now();
   }
 
@@ -272,7 +271,7 @@ export class UI implements UIHooks {
         if (arg === 'school') {
           this.panel = 'room';
           this.panelEl.classList.remove('hidden');
-          $('.panel-body', this.panelEl).innerHTML = this.schoolOverview();
+          morph($('.panel-body', this.panelEl), this.schoolOverview());
           this.panelArg = -1;
           this.renderToolbar();
           break;
@@ -345,18 +344,25 @@ export class UI implements UIHooks {
   }
 
   // ------------------------------------------------------------ skill tree
+  skillBranch: BranchId = 'pedagogia';
+
   toggleSkills() {
-    if (this.skillOpen) { $('.skill-modal')?.remove(); this.skillOpen = false; this.renderToolbar(); return; }
+    if (this.skillOpen) { $('.skill-modal')?.remove(); this.skillOpen = false; this.g.resume(); this.renderToolbar(); return; }
     this.skillOpen = true;
+    this.g.pause();
+    // open on a branch that has something to buy
+    const s = this.g.s;
+    const buyable = SKILLS.find((x) => !this.g.has(x.id) && x.req.every((r) => this.g.has(r)) && s.skillPoints >= x.cost && !(x.minChapter && s.chapter < x.minChapter));
+    if (buyable) this.skillBranch = buyable.branch;
     const m = document.createElement('div');
     m.className = 'skill-modal';
-    m.innerHTML = `<div class="skill-inner"><div class="skill-head"><div><div class="px st-title">ÁRVORE DA ESCOLA</div><div class="small muted">Notas musicais disponíveis: <b class="st-points"></b> 🎵</div></div><button class="btn ghost" data-act2="close">✕ Fechar</button></div><div class="skill-body"><div class="skill-svg"></div><div class="skill-side"></div></div></div>`;
+    m.innerHTML = `<div class="skill-inner"><div class="skill-head"><div><div class="px st-title">ÁRVORE DA ESCOLA</div><div class="small muted">Cada nível de reputação = 1 nota 🎵. Escolha bem: não dá para ter tudo.</div></div><div class="st-points-box"><b class="st-points"></b><span>🎵 notas</span></div><button class="btn ghost" data-act2="close">✕</button></div><div class="skill-body"></div></div>`;
     document.body.appendChild(m);
     m.addEventListener('click', (e) => {
       const t = e.target as Element;
-      if (t.closest('[data-act2=close]') || t === m) { this.toggleSkills(); return; }
-      const node = t.closest('[data-skill]') as SVGGElement | null;
-      if (node) { this.skillSel = node.dataset.skill!; sfx.click(); this.renderSkills(); return; }
+      if (t.closest('[data-act2=close]') || t === m) { sfx.click(); this.toggleSkills(); return; }
+      const tab = t.closest('[data-branch]') as HTMLElement | null;
+      if (tab) { this.skillBranch = tab.dataset.branch as BranchId; sfx.click(); this.renderSkills(); return; }
       const b = t.closest('[data-act=buySkill]') as HTMLElement | null;
       if (b && !(b as HTMLButtonElement).disabled) { this.g.buySkill(b.dataset.arg!); this.renderSkills(); this.renderToolbar(); }
     });
@@ -367,8 +373,7 @@ export class UI implements UIHooks {
   renderSkills() {
     const m = $('.skill-modal');
     if (!m) return;
-    $('.skill-svg', m).innerHTML = skillTreeSVG(this.g, this.skillSel);
-    $('.skill-side', m).innerHTML = skillDetail(this.g, this.skillSel);
+    morph($('.skill-body', m), skillTreeHTML(this.g, this.skillBranch));
     $('.st-points', m).textContent = String(this.g.s.skillPoints);
   }
 

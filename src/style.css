@@ -600,3 +600,55 @@ input[type=range] { accent-color: #c9962e; }
   .build-bar { top: 4px; padding: 5px 8px; font-size: 12px; max-width: calc(100vw - 90px); left: calc(50% - 34px); }
   .bb-list { max-height: 56px; }
 }
+
+/* ================================================================ touch responsiveness */
+html, body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+button, .tb-btn, .btn, [data-act], [data-branch] { touch-action: manipulation; }
+input, .inp { -webkit-user-select: text; user-select: text; }
+.btn, .tb-btn, .spd, .ico, .build-opt, .buy-inst, .lead-opt, .room-row, .st-tab { -webkit-tap-highlight-color: transparent; }
+.btn:active, .tb-btn:active, .spd:active, .ico:active, .buy-inst:active, .room-row:active { filter: brightness(.94); }
+
+/* ================================================================ skill tree (tabs + cards) */
+.skill-modal { padding: 0; }
+.skill-inner { width: 100vw; height: 100vh; max-width: none; border-radius: 0; border: none; }
+.skill-head { gap: 12px; }
+.skill-head > div:first-child { flex: 1; }
+.st-points-box { display: flex; align-items: baseline; gap: 6px; background: #2e2433; color: #ffe08a; padding: 6px 14px; border-radius: 12px; }
+.st-points { font-size: 22px; font-weight: 800; font-family: var(--sans); }
+.skill-body { flex-direction: column; overflow: hidden; display: flex; }
+.st-tabs { display: flex; gap: 6px; padding: 10px 14px; overflow-x: auto; border-bottom: 2px solid var(--line); flex-shrink: 0; }
+.st-tab { position: relative; display: flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 14px; border: 2px solid var(--line); background: #fff; font-family: var(--sans); font-weight: 800; font-size: 14px; color: var(--ink); cursor: pointer; white-space: nowrap; }
+.st-tab-i { width: 26px; height: 26px; border-radius: 50%; background: var(--c); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+.st-tab small { color: var(--muted); font-weight: 700; }
+.st-tab.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 14%, white); box-shadow: 0 3px 0 color-mix(in srgb, var(--c) 45%, white); }
+.st-dot { position: absolute; top: -4px; right: -4px; width: 12px; height: 12px; border-radius: 50%; background: #e05a4a; border: 2px solid #fff; }
+.st-lane { position: relative; flex: 1; display: flex; align-items: center; gap: 8px; padding: 16px; overflow: auto; }
+.st-staff { position: absolute; left: 0; right: 0; top: 50%; height: 34px; transform: translateY(-50%); background: repeating-linear-gradient(180deg, color-mix(in srgb, var(--c) 35%, transparent) 0 2px, transparent 2px 8px); opacity: .5; pointer-events: none; }
+.st-col { position: relative; display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
+.st-arrow { position: relative; color: var(--c); font-size: 22px; font-weight: 800; flex-shrink: 0; }
+.st-card { width: 230px; background: #fff; border: 2px solid var(--line); border-radius: 16px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 4px 0 #ece0c8; }
+.st-card.available { border-color: var(--c); box-shadow: 0 4px 0 color-mix(in srgb, var(--c) 40%, white); }
+.st-card.owned { background: color-mix(in srgb, var(--c) 12%, white); border-color: color-mix(in srgb, var(--c) 60%, white); }
+.st-card.locked { opacity: .62; }
+.st-card-h { display: flex; align-items: center; gap: 8px; }
+.st-card-h b { flex: 1; font-size: 15px; line-height: 1.15; }
+.st-ico { width: 34px; height: 34px; border-radius: 10px; background: color-mix(in srgb, var(--c) 18%, white); display: flex; align-items: center; justify-content: center; font-size: 19px; flex-shrink: 0; }
+.st-cost { font-family: var(--px); font-size: 12px; color: #7a5a1e; white-space: nowrap; }
+.st-desc { font-size: 13px; line-height: 1.35; color: #4a3e46; }
+.st-buy { width: 100%; }
+.st-owned { font-weight: 800; color: var(--green); font-size: 13px; }
+.st-req { font-size: 12px; color: var(--muted); }
+@media (max-height: 520px) {
+  .skill-head { padding: 6px 10px; }
+  .skill-head .small { display: none; }
+  .st-points { font-size: 17px; }
+  .st-tabs { padding: 6px 8px; gap: 4px; }
+  .st-tab { padding: 5px 9px; font-size: 12px; border-radius: 12px; }
+  .st-tab-i { width: 22px; height: 22px; font-size: 13px; }
+  .st-lane { padding: 8px 10px; align-items: flex-start; }
+  .st-card { width: 200px; padding: 8px 10px; gap: 4px; }
+  .st-card-h b { font-size: 13.5px; }
+  .st-desc { font-size: 12px; }
+  .st-ico { width: 28px; height: 28px; font-size: 16px; }
+  .st-col { gap: 6px; }
+}
